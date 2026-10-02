@@ -1,0 +1,6 @@
+Django>=5.2,<5.3
+Telethon>=1.42,<2
+cryptography>=44
+Pillow>=11
+python-dotenv>=1
+python-socks[asyncio]>=2.7

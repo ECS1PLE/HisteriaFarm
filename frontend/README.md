@@ -1,75 +1,69 @@
-# React + TypeScript + Vite
+# Histeria Workspace
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Тёмная веб-панель управления аккаунтами на React + TypeScript, Ant Design и Tailwind CSS. Сборка — Vite. Интерфейс на русском языке, адаптируется к мобильному экрану.
 
-Currently, two official plugins are available:
+## Запуск
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Адрес выводится в терминале (по умолчанию `http://localhost:5173`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm run build # TypeScript и production-сборка
+npm run lint  # ESLint
+npm run preview # просмотр production-сборки
 ```
+
+## Возможности
+
+- Вход в панель с Django session cookie.
+- Подключение настоящих Telegram-аккаунтов по телефону, коду и 2FA.
+- Редактирование имени, фамилии, username, описания и аватарки прямо в карточке.
+- Случайные имена, username, короткие описания и абстрактные JPEG-аватарки без внешнего сервиса.
+- «Сгенерировать всем» / «Сгенерировать выбранным»: предпросмотр, выбор полей, последовательное применение, результаты и остановка после текущего аккаунта.
+- Серверное хранение аккаунтов и журнала; зашифрованные Telegram-сессии и API-ключи.
+- Настоящая проверка подключения к Telegram, поиск, фильтры, группы, экспорт и адаптивная таблица.
+- Локальные настройки внешнего вида и черновики режимов.
+
+Нужен Django backend на 127.0.0.1:8001: запросы /api проксируются через Vite. Инструкция запуска, создания пользователя и настройки Telegram — в [backend/README.md](../backend/README.md).
+Первый вход в панель использует логин и пароль Django. Затем укажи API ID / API Hash в настройках и подключи аккаунт. Демо-аккаунты и имитация выполнения удалены. Режимы комментариев, реакций, подписок и Mini Apps остаются редакторами конфигурации; запуск пока отключён.
+
+## Структура
+
+```text
+src/
+  components/
+    UI/             переиспользуемые кнопки, поля, меню, карточки и индикаторы
+    accounts/       таблица, вход Telegram, редактор профиля и генератор
+    auth/           вход в панель
+    activity/       журнал и элементы событий
+    common/         элементы с общей логикой предметной области
+    config/         редакторы текста, реакций, площадок и сценариев
+    dashboard/      блоки главной страницы и сборка диалогов
+    layout/         меню, верхняя панель, заголовок и подвал
+    settings/       настройки пространства
+    tasks/          строки задач, действия, выбор аккаунтов и форма запуска
+  config/           тема Ant Design
+  hooks/            состояние панели, фильтрация и localStorage
+  pages/            сборка страницы из готовых блоков
+  providers/        контекст приложения и тема
+  services/         запросы к Django API
+  utils/            общие функции и локальная генерация профилей
+  App.tsx           сборка провайдеров и страницы
+  data.ts           начальная конфигурация и подписи
+  types.ts          типы аккаунтов, конфигурации, задач и событий
+  App.css           оформление и адаптивная вёрстка
+  index.css         Tailwind и базовые стили
+```
+
+Redux Toolkit не требуется для текущего объёма состояния. Серверный API подключён через services. Реальное выполнение Telegram-задач и автоматизацию Mini App следует реализовывать в серверных обработчиках, отдельно от интерфейса.
+
+## Правила сборки интерфейса
+
+- `components/UI` содержит элементы без привязки к аккаунтам и Telegram. Они получают данные и обработчики через props. Базовые контролы используют Ant Design; общие элементы экспортируются из `components/UI/index.ts`.
+- Компоненты разделов собирают интерфейс из `UI`: например, таблица использует отдельные ячейки, фильтры и меню действий, а настройки режимов — отдельные редакторы.
+- `DashboardPage` соединяет блоки страницы с состоянием из `useDashboard`. Загрузка данных и обработчики находятся в hooks, а тема — в `config/theme.ts`.
+- Новый повторяющийся элемент добавляется в `UI` и используется в нужных блоках. Элемент с логикой аккаунтов или задач размещается в соответствующем разделе.
