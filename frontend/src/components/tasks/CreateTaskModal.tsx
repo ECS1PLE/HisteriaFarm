@@ -28,9 +28,9 @@ export default function CreateTaskModal({
       open={open}
       onCancel={() => onClose()}
       onOk={() => form.submit()}
-      okText="Запустить демо"
+      okText="Запустить"
       cancelText="Отмена"
-      okButtonProps={{ disabled: !ready.length }}
+      okButtonProps={{ disabled: true }}
     >
       <p className="modal-description">
         Режим <strong>{modeLabels[mode]}</strong> ·{' '}
@@ -54,17 +54,9 @@ export default function CreateTaskModal({
         <TaskPreview config={config} />
         <Notice
           className="mt-4"
-          title={
-            ready.length
-              ? 'Будет запущена демонстрация выполнения'
-              : 'Нет готовых аккаунтов'
-          }
-          description={
-            ready.length
-              ? 'Telegram не подключён. Прогресс и статусы изменяются локально.'
-              : 'Добавь аккаунт или выполни демо-проверку в его карточке.'
-          }
-          type={ready.length ? 'info' : 'warning'}
+          title="Выполнение задач ещё не подключено"
+          description="Сейчас доступны подключение аккаунтов и редактирование профилей."
+          type="info"
           showIcon
         />
       </Form>

@@ -29,7 +29,7 @@ export default function AccountActions({
         },
         {
           key: 'check',
-          label: 'Проверить (демо)',
+          label: 'Проверить в Telegram',
           icon: <CheckCircleOutlined aria-hidden="true" />,
           disabled: account.status === 'working',
           onClick: () => onCheck(account),

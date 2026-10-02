@@ -1,22 +1,31 @@
-import { Drawer, Notice, SettingRow } from '../UI'
-import type { Preferences } from '../../types'
+import { Button, Drawer, Notice, SettingRow } from '../UI'
+import TelegramSettingsForm from './TelegramSettingsForm'
+import type { Preferences, SessionStatus } from '../../types'
 interface Props {
   open: boolean
   preferences: Preferences
+  session: SessionStatus | null
   onClose: () => void
   onChange: (patch: Partial<Preferences>) => void
+  onConnected: () => Promise<void>
+  onLogout: () => void
 }
 export default function SettingsDrawer({
   open,
   preferences,
+  session,
   onClose,
   onChange,
+  onConnected,
+  onLogout,
 }: Props) {
   return (
-    <Drawer title="Настройки пространства" open={open} onClose={onClose}>
-      <p className="drawer-description">
-        Настрой панель под свой рабочий процесс.
-      </p>
+    <Drawer
+      title="Настройки пространства"
+      open={open}
+      onClose={onClose}
+      destroyOnHidden
+    >
       <SettingRow
         label="Компактная таблица"
         description="Больше аккаунтов на одном экране"
@@ -29,15 +38,22 @@ export default function SettingsDrawer({
         checked={preferences.showActivity}
         onChange={(showActivity) => onChange({ showActivity })}
       />
+      <TelegramSettingsForm
+        configured={session?.telegramConfigured ?? false}
+        onSaved={onConnected}
+      />
       <Notice
         className="mt-6"
-        title="Локальное пространство"
-        description="Аккаунты, конфигурация, задачи и настройки сохраняются в этом браузере. Для работы с Telegram потребуется серверная часть."
+        title="Серверное пространство"
+        description="Аккаунты и журнал хранятся в Django. Настройки внешнего вида и черновик режима — в браузере."
       />
       <div className="settings-info">
-        <span>Версия панели</span>
-        <strong>0.1.0</strong>
+        <span>Пользователь</span>
+        <strong>{session?.username}</strong>
       </div>
+      <Button block onClick={onLogout}>
+        Выйти из панели
+      </Button>
     </Drawer>
   )
 }

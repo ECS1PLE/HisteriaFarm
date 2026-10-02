@@ -12,7 +12,7 @@ export default function IntervalField({
       <Divider />
       <Field
         label="Интервал между действиями"
-        help="В демо-режиме определяет скорость прогресса задачи."
+        help="Пауза между действиями для будущего исполнителя задач."
       >
         <div className="flex items-center gap-3">
           <NumberInput

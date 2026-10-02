@@ -5,6 +5,11 @@ export type Page = 'accounts' | 'tasks' | 'activity'
 export interface Account {
   id: string
   name: string
+  firstName?: string
+  lastName?: string
+  bio?: string
+  avatarUrl?: string | null
+  error?: string
   username: string
   phone: string
   group: string
@@ -64,3 +69,15 @@ export interface Preferences {
   showActivity: boolean
 }
 export type ConfigSection = 'mode' | 'text' | 'targets'
+
+export interface ProfileFields {
+  firstName: string
+  lastName: string
+  username: string
+  bio: string
+}
+export interface SessionStatus {
+  authenticated: boolean
+  username: string | null
+  telegramConfigured: boolean
+}

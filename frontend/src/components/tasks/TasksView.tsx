@@ -19,13 +19,15 @@ export default function TasksView({
       <PanelHeading
         title="Очередь задач"
         count={tasks.length}
-        action={<span className="muted-text">Демонстрация выполнения</span>}
+        action={
+          <span className="muted-text">Выполнение ещё не подключено</span>
+        }
       />
       {!tasks.length ? (
         <EmptyState
           className="task-empty"
           description="Здесь появятся твои задачи"
-          help="Выбери режим и аккаунты, чтобы запустить первую демонстрацию."
+          help="Управление задачами появится после подключения исполнителя."
           action={
             <Button
               type="primary"

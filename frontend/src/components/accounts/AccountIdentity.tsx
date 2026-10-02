@@ -11,7 +11,13 @@ export default function AccountIdentity({
 }) {
   return (
     <button type="button" className="account-cell" onClick={onClick}>
-      <Avatar size={36} name={account.name} color={account.color} bordered />
+      <Avatar
+        size={36}
+        src={account.avatarUrl || undefined}
+        name={account.name}
+        color={account.color}
+        bordered
+      />
       <span>
         <strong>
           {account.name}
@@ -21,7 +27,9 @@ export default function AccountIdentity({
             </Tooltip>
           )}
         </strong>
-        <small>@{account.username}</small>
+        <small>
+          {account.username ? '@' + account.username : 'Без username'}
+        </small>
       </span>
     </button>
   )

@@ -14,10 +14,7 @@ export default function ProxyCell({ account }: { account: Account }) {
       />
       <span>
         {account.proxy}
-        <small>
-          {account.country === 'RU' ? 'Россия' : 'Германия'}{' '}
-          <span>· SOCKS5</span>
-        </small>
+        <small>Прямое подключение</small>
       </span>
     </div>
   )

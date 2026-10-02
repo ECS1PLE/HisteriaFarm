@@ -3,9 +3,9 @@ export default function AccountTableCaption() {
   return (
     <div className="table-caption">
       <span>
-        <ConnectionDot /> Статусы обновляются в демо-режиме
+        <ConnectionDot /> Статус подтверждается проверкой Telegram
       </span>
-      <span>Выбор доступен для готовых аккаунтов</span>
+      <span>Выбранные аккаунты можно обновить одной кнопкой</span>
     </div>
   )
 }

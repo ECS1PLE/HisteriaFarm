@@ -4,6 +4,7 @@ import { Avatar, ConnectionDot, IconButton } from '../UI'
 import NotificationList from './NotificationList'
 import type { Activity } from '../../types'
 interface Props {
+  connected: boolean
   title: string
   events: Activity[]
   hasNotifications: boolean
@@ -11,6 +12,7 @@ interface Props {
 }
 export default function Topbar({
   title,
+  connected,
   events,
   hasNotifications,
   onOpenMenu,
@@ -31,8 +33,8 @@ export default function Topbar({
       </div>
       <div className="topbar-actions">
         <span className="demo-indicator">
-          <ConnectionDot />
-          Демо-режим
+          <ConnectionDot tone={connected ? 'default' : 'muted'} />
+          {connected ? 'Telegram настроен' : 'Настрой Telegram'}
         </span>
         <span className="topbar-divider" />
         <Popover

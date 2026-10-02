@@ -20,6 +20,8 @@ export default function AccountSelectionBar({
       </Button>
       <Button
         size="small"
+        disabled
+        title="Выполнение задач ещё не подключено"
         type="primary"
         icon={<ThunderboltOutlined aria-hidden="true" />}
         onClick={onLaunch}

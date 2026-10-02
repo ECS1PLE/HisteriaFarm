@@ -4,11 +4,10 @@ export default function PageFooter() {
   return (
     <footer className="page-footer">
       <span>
-        histeria<span> workspace</span> <Badge variant="version">v0.1</Badge>
+        histeria<span> workspace</span> <Badge variant="version">v0.2</Badge>
       </span>
       <span>
-        <ClockCircleOutlined aria-hidden="true" /> Локальное пространство ·
-        Демо-данные
+        <ClockCircleOutlined aria-hidden="true" /> Серверное пространство
       </span>
     </footer>
   )

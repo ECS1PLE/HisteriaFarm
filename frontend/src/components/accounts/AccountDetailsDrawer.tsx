@@ -1,12 +1,16 @@
-import { Descriptions, Tooltip } from 'antd'
+import { Descriptions } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
-import { Button, Drawer, Field } from '../UI'
+import { Button, Drawer, Field, Notice } from '../UI'
+import ProfileEditor from './ProfileEditor'
 import AccountProfile from './AccountProfile'
 import GroupSelect from '../common/GroupSelect'
 import type { Account, Task } from '../../types'
 interface Props {
   account?: Account
   tasks: Task[]
+  onSaved: () => Promise<void>
+  onBusy: (busy: boolean) => void
+  busy: boolean
   onClose: () => void
   onCheck: (account: Account) => void
   onDelete: (account: Account) => void
@@ -19,12 +23,24 @@ export default function AccountDetailsDrawer({
   onCheck,
   onDelete,
   onGroupChange,
+  onSaved,
+  onBusy,
+  busy,
 }: Props) {
   return (
-    <Drawer title="Аккаунт" open={!!account} onClose={onClose}>
+    <Drawer
+      title="Аккаунт"
+      open={!!account}
+      onClose={onClose}
+      destroyOnHidden
+      closable={!busy}
+      maskClosable={!busy}
+      keyboard={!busy}
+    >
       {account && (
         <>
           <AccountProfile account={account} />
+          {account.error && <Notice className="mb-4" type="warning" title={account.error} />}
           <Descriptions
             column={1}
             items={[
@@ -33,7 +49,7 @@ export default function AccountDetailsDrawer({
               {
                 key: 'country',
                 label: 'Страна',
-                children: account.country === 'RU' ? 'Россия' : 'Германия',
+                children: account.country || 'Не определена',
               },
               {
                 key: 'premium',
@@ -61,26 +77,32 @@ export default function AccountDetailsDrawer({
           />
           <Field label="Группа аккаунта" labelClassName="mt-4">
             <GroupSelect
+              disabled={busy}
               className="w-full"
               value={account.group}
               onChange={(group) => onGroupChange(account, group)}
             />
           </Field>
+          <ProfileEditor
+            key={account.id}
+            account={account}
+            onSaved={onSaved}
+            onBusy={onBusy}
+          />
           <div className="detail-actions">
-            <Tooltip title="Локальный сброс статуса без обращения к Telegram">
-              <Button
-                block
-                icon={<ReloadOutlined aria-hidden="true" />}
-                disabled={account.status === 'working'}
-                onClick={() => onCheck(account)}
-              >
-                Проверить аккаунт (демо)
-              </Button>
-            </Tooltip>
+            <Button
+              block
+              icon={<ReloadOutlined aria-hidden="true" />}
+              disabled={busy || account.status === 'working'}
+              onClick={() => onCheck(account)}
+            >
+              Проверить аккаунт
+            </Button>
+
             <Button
               block
               danger
-              disabled={account.status === 'working'}
+              disabled={busy || account.status === 'working'}
               onClick={() => onDelete(account)}
             >
               Удалить аккаунт

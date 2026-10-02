@@ -1,5 +1,11 @@
-import { PlusOutlined, ThunderboltFilled } from '@ant-design/icons'
-import { Button } from '../components/UI'
+import {
+  PlusOutlined,
+  ThunderboltFilled,
+  ReloadOutlined,
+} from '@ant-design/icons'
+import { Spin } from 'antd'
+import PanelLogin from '../components/auth/PanelLogin'
+import { Button, Notice, Panel } from '../components/UI'
 import AppLayout from '../components/layout/AppLayout'
 import Sidebar from '../components/layout/Sidebar'
 import Topbar from '../components/layout/Topbar'
@@ -18,6 +24,30 @@ const descriptions = {
 }
 export default function DashboardPage() {
   const dashboard = useDashboard()
+  if (dashboard.loading)
+    return (
+      <div className="connection-screen">
+        <Spin size="large" />
+      </div>
+    )
+  if (dashboard.connectionError)
+    return (
+      <div className="connection-screen">
+        <Panel className="connection-panel">
+          <h1>Подключение к серверу</h1>
+          <Notice type="error" title={dashboard.connectionError} />
+          <Button
+            className="mt-6"
+            block
+            onClick={() => void dashboard.connect()}
+          >
+            Повторить
+          </Button>
+        </Panel>
+      </div>
+    )
+  if (!dashboard.session?.authenticated)
+    return <PanelLogin onLogin={dashboard.connect} />
   return (
     <AppLayout
       sidebar={
@@ -36,6 +66,7 @@ export default function DashboardPage() {
       topbar={
         <Topbar
           title={dashboard.title}
+          connected={dashboard.session.telegramConfigured}
           events={dashboard.events}
           hasNotifications={dashboard.attention > 0}
           onOpenMenu={() => dashboard.setMobileOpen(true)}
@@ -57,8 +88,31 @@ export default function DashboardPage() {
                 Добавить аккаунт
               </Button>
             )}
+            {dashboard.page === 'accounts' && (
+              <>
+                <Button
+                  icon={<ReloadOutlined aria-hidden="true" />}
+                  loading={dashboard.busy}
+                  disabled={!dashboard.accounts.length}
+                  onClick={() => dashboard.checkAccounts()}
+                >
+                  Проверить
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<ThunderboltFilled aria-hidden="true" />}
+                  disabled={!dashboard.accounts.length || dashboard.busy}
+                  onClick={() => dashboard.setGenerationOpen(true)}
+                >
+                  {dashboard.selected.length
+                    ? 'Сгенерировать выбранным'
+                    : 'Сгенерировать всем'}
+                </Button>
+              </>
+            )}
             <Button
-              type="primary"
+              disabled
+              title="Выполнение задач ещё не подключено"
               icon={<ThunderboltFilled aria-hidden="true" />}
               onClick={dashboard.openLaunch}
             >

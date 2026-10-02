@@ -15,7 +15,7 @@ export default function SidebarPromo() {
         <br />в одном пространстве.
       </p>
       <span className="demo-card-label">
-        <CheckCircleOutlined aria-hidden="true" /> Демо-режим
+        <CheckCircleOutlined aria-hidden="true" /> Управление профилями
       </span>
       <ArrowUpOutlined aria-hidden="true" className="demo-decoration" />
     </div>

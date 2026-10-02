@@ -144,7 +144,7 @@ export default function AccountTable({
           selectedRowKeys: selected,
           onChange: (keys) => onSelect(keys.map(String)),
           getCheckboxProps: (account) => ({
-            disabled: account.status !== 'ready',
+            disabled: account.status === 'working',
             'aria-label': `Выбрать ${account.name}`,
           }),
         }}
