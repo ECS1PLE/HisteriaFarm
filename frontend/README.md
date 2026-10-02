@@ -1,75 +1,46 @@
-# React + TypeScript + Vite
+# Histeria Workspace
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Тёмная веб-панель управления аккаунтами на React + TypeScript, Ant Design и Tailwind CSS. Сборка — Vite. Интерфейс на русском языке, адаптируется к мобильному экрану.
 
-Currently, two official plugins are available:
+## Запуск
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Адрес выводится в терминале (по умолчанию `http://localhost:5173`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm run build # TypeScript и production-сборка
+npm run lint  # ESLint
+npm run preview # просмотр production-сборки
 ```
+
+## Возможности прототипа
+
+- Список из 16 демонстрационных аккаунтов: поиск, фильтры по статусу и группе, выбор готовых аккаунтов, пагинация, экспорт отфильтрованного списка в JSON.
+- Добавление демо-профилей, карточки аккаунтов, изменение группы и удаление с подтверждением.
+- Настройки отдельных режимов: комментарии, реакции, подписки, сценарии для бота / Mini App.
+- Редактирование текста, списка каналов и чатов, реакции, последовательности шагов и интервала.
+- Создание локальных задач с проверкой готовности аккаунтов, прогрессом, паузой, продолжением и остановкой. Задача сохраняет снимок конфигурации на момент запуска.
+- Смена статусов аккаунтов, статистика и журнал событий.
+- Компактная таблица и переключение блока последних событий.
+- Сохранение состояния в localStorage. После обновления страницы активные задачи продолжают демонстрацию; вкладка должна быть открыта для изменения прогресса.
+
+Все профили и действия демонстрационные. Telegram, прокси и Mini App не подключены. Кнопка проверки аккаунта локально переводит свободные аккаунты в статус «Готов к работе».
+
+## Структура
+
+```text
+src/
+  components/       навигация, таблица, настройки режимов, задачи и журнал
+  hooks/            сохранение состояния в localStorage
+  App.tsx           состояние пространства, демо-задачи и формы
+  data.ts           демонстрационные данные и подписи
+  types.ts          типы аккаунтов, конфигурации, задач и событий
+  App.css           оформление и адаптивная вёрстка
+  index.css         Tailwind и базовые стили
+```
+
+Redux Toolkit не требуется для текущего объёма состояния. Типы и компоненты разделены для последующего подключения серверного API. Реальное выполнение Telegram-задач и автоматизацию Mini App следует реализовывать в серверных обработчиках, отдельно от интерфейса.
