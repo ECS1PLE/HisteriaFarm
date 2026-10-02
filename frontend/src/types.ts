@@ -42,3 +42,25 @@ export interface Activity {
   time: string
   type: 'success' | 'info' | 'warning'
 }
+
+export interface Workspace {
+  accounts: Account[]
+  tasks: Task[]
+  events: Activity[]
+}
+export interface AccountFields {
+  name: string
+  username: string
+  phone: string
+  proxy?: string
+  group: string
+}
+export interface TaskFields {
+  name: string
+  accountIds: string[]
+}
+export interface Preferences {
+  compact: boolean
+  showActivity: boolean
+}
+export type ConfigSection = 'mode' | 'text' | 'targets'

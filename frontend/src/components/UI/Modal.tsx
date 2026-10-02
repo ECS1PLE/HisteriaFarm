@@ -1,0 +1,5 @@
+import { Modal as AntModal } from 'antd'
+import type { ModalProps } from 'antd'
+export default function Modal(props: ModalProps) {
+  return <AntModal cancelText="Отмена" {...props} />
+}
