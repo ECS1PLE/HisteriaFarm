@@ -13,7 +13,7 @@ import type {
   TaskConfig,
   Workspace,
 } from '../types'
-const empty: Workspace = { accounts: [], tasks: [], events: [] }
+const empty: Workspace = { accounts: [], tasks: [], events: [], warmups: [], warmupWorkerOnline: false }
 export function useDashboard() {
   const { message, modal } = AntApp.useApp()
   const [workspace, setWorkspace] = useState<Workspace>(empty)
@@ -39,6 +39,7 @@ export function useDashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [generationOpen, setGenerationOpen] = useState(false)
+  const [warmupOpen, setWarmupOpen] = useState(false)
   const [detailsId, setDetailsId] = useState<string | null>(null)
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const next = await api<Workspace>('workspace/', { signal })
@@ -89,6 +90,22 @@ export function useDashboard() {
       })
     return () => controller.abort()
   }, [refresh])
+  useEffect(() => {
+    if (!session?.authenticated) return
+    const controller = new AbortController()
+    const timer = window.setInterval(() => {
+      void refresh(controller.signal).catch((e) => {
+        if (e instanceof ApiError && e.status === 401) {
+          setSession(null)
+          setWorkspace(empty)
+        }
+      })
+    }, 15_000)
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [refresh, session?.authenticated])
   const execute = async (action: () => Promise<void>) => {
     setBusy(true)
     try {
@@ -195,6 +212,15 @@ export function useDashboard() {
     setAddOpen,
     generationOpen,
     setGenerationOpen,
+    warmupOpen,
+    setWarmupOpen,
+    stopWarmup: (id: string) => {
+      void execute(async () => {
+        await api(`warmups/${id}/stop/`, { method: 'POST' })
+        await refresh()
+        message.success('Прогрев остановлен')
+      })
+    },
     detailAccount: accounts.find((a) => a.id === detailsId),
     setDetailsId,
     ready: accounts.filter((a) => a.status === 'ready'),

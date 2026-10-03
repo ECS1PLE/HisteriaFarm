@@ -1732,3 +1732,8 @@
 @media (max-width: 650px) {
   .heading-actions .ant-btn { flex: 1 1 calc(50% - 10px); min-width: 0; padding-inline: 8px; font-size: 11px; }
 }
+.warmup-panel { margin-bottom: 20px; }
+.warmup-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; }
+.warmup-row + .warmup-row { border-top: 1px solid rgba(255, 255, 255, .08); }
+.warmup-row p { margin: 6px 0; }
+@media (max-width: 640px) { .warmup-row { align-items: flex-start; flex-direction: column; } }

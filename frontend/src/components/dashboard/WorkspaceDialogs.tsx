@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import AddAccountModal from '../accounts/AddAccountModal'
 import AccountDetailsDrawer from '../accounts/AccountDetailsDrawer'
 import GenerateProfilesModal from '../accounts/GenerateProfilesModal'
+import WarmupModal from '../accounts/WarmupModal'
 import ConfigDrawer from '../config/ConfigDrawer'
 import SettingsDrawer from '../settings/SettingsDrawer'
 import type { useDashboard } from '../../hooks/useDashboard'
@@ -44,6 +45,10 @@ export default function WorkspaceDialogs({
           onClose={() => controller.setGenerationOpen(false)}
           onApplied={controller.refresh}
         />
+      )}
+      {controller.warmupOpen && (
+        <WarmupModal accounts={targets} selected={!!controller.selected.length}
+          onClose={() => controller.setWarmupOpen(false)} onStarted={controller.refresh} />
       )}
       <AccountDetailsDrawer
         account={controller.detailAccount}

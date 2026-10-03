@@ -52,6 +52,23 @@ export interface Workspace {
   accounts: Account[]
   tasks: Task[]
   events: Activity[]
+  warmups: WarmupJob[]
+  warmupWorkerOnline: boolean
+}
+export interface WarmupJob {
+  id: string
+  status: 'running' | 'completed' | 'cancelled' | 'failed'
+  startedAt: string
+  endsAt: string
+  error: string
+  sent: number
+  progress: number
+  participants: {
+    accountId: string
+    name: string
+    sent: number
+    nextMessageAt: string | null
+  }[]
 }
 export interface AccountFields {
   name: string

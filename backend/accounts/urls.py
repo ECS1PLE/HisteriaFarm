@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 urlpatterns = [
+ path("warmups/", views.start_warmup), path("warmups/<uuid:job_id>/stop/", views.stop_warmup),
  path("status/", views.status), path("login/", views.panel_login), path("logout/", views.panel_logout),
  path("telegram/settings/", views.telegram_settings), path("workspace/", views.workspace),
  path("telegram/login/", views.start_login), path("telegram/login/<uuid:attempt_id>/", views.finish_login),

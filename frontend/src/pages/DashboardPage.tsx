@@ -14,6 +14,7 @@ import PageFooter from '../components/layout/PageFooter'
 import WorkspaceStats from '../components/dashboard/WorkspaceStats'
 import AccountsView from '../components/dashboard/AccountsView'
 import WorkspaceDialogs from '../components/dashboard/WorkspaceDialogs'
+import WarmupPanel from '../components/accounts/WarmupPanel'
 import TasksView from '../components/tasks/TasksView'
 import ActivityView from '../components/activity/ActivityView'
 import { useDashboard } from '../hooks/useDashboard'
@@ -55,7 +56,7 @@ export default function DashboardPage() {
           page={dashboard.page}
           mode={dashboard.mode}
           accountCount={dashboard.accounts.length}
-          runningCount={dashboard.activeTasks.length}
+          runningCount={dashboard.activeTasks.length + dashboard.warmups.filter((job) => job.status === 'running').length}
           onPage={dashboard.setPage}
           onConfigure={dashboard.configure}
           onSettings={() => dashboard.setSettingsOpen(true)}
@@ -108,6 +109,12 @@ export default function DashboardPage() {
                     ? 'Сгенерировать выбранным'
                     : 'Сгенерировать всем'}
                 </Button>
+                <Button
+                  disabled={(dashboard.selected.length || dashboard.accounts.length) < 2 || dashboard.busy || dashboard.warmups.some((job) => job.status === 'running')}
+                  onClick={() => dashboard.setWarmupOpen(true)}
+                >
+                  Прогреть аккаунты
+                </Button>
               </>
             )}
             <Button
@@ -126,8 +133,11 @@ export default function DashboardPage() {
         ready={dashboard.ready.length}
         working={dashboard.working}
         attention={dashboard.attention}
-        activeTasks={dashboard.activeTasks.length}
+        activeTasks={dashboard.activeTasks.length + dashboard.warmups.filter((job) => job.status === 'running').length}
       />
+      {(dashboard.page === 'accounts' || dashboard.page === 'tasks') && (
+        <WarmupPanel jobs={dashboard.warmups} workerOnline={dashboard.warmupWorkerOnline} busy={dashboard.busy} onStop={dashboard.stopWarmup} />
+      )}
       {dashboard.page === 'accounts' && (
         <AccountsView
           accounts={dashboard.accounts}

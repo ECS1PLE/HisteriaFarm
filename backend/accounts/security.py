@@ -12,11 +12,11 @@ def decrypt(value):
     return json.loads(Fernet(settings.SESSION_ENCRYPTION_KEY).decrypt(value.encode()))
 
 @contextmanager
-def session_lock(key):
+def session_lock(key, blocking=False):
     path = settings.VAR_DIR / f"lock-{key}"
     with path.open("a") as f:
         try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         except BlockingIOError:
             raise ValidationError("Этот аккаунт уже выполняет операцию. Повтори позже.")
         try:
