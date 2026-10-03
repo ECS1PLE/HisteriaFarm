@@ -7,4 +7,6 @@ urlpatterns = [
  path("telegram/login/", views.start_login), path("telegram/login/<uuid:attempt_id>/", views.finish_login),
  path("accounts/<uuid:account_id>/", views.account_detail), path("accounts/<uuid:account_id>/profile/", views.profile),
  path("accounts/<uuid:account_id>/avatar/", views.avatar),
+ path("accounts/<uuid:account_id>/report/", views.prepare_report),
+ path("accounts/<uuid:account_id>/report/<uuid:report_id>/", views.submit_report),
 ]

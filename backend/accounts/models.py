@@ -35,6 +35,13 @@ class Activity(models.Model):
     type = models.CharField(max_length=16, default="info")
     created_at = models.DateTimeField(auto_now_add=True)
 
+class ReportDraft(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    payload = models.TextField()
+    state = models.CharField(max_length=16, default="confirm")
+    expires = models.DateTimeField()
+
 class WarmupJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

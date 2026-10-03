@@ -8,9 +8,9 @@ from django.db import IntegrityError
 from django.http import JsonResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
-from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob
+from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob, ReportDraft
 from .security import encrypt, session_lock
-from . import telegram, warmup
+from . import telegram, warmup, reports
 
 def api(methods, public=False, failure_title=None):
     def decorate(view):
@@ -172,6 +172,22 @@ def avatar(request, account_id):
     response["Cache-Control"] = "private, no-store"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+@api(["GET", "POST"])
+def prepare_report(request, account_id):
+    account = own_account(request, account_id)
+    if not account:
+        return JsonResponse({"error": "Аккаунт не найден."}, status=404)
+    if request.method == "GET":
+        return JsonResponse({"reasons": [{"value": key, "label": value[0]} for key, value in reports.REASONS.items()]})
+    return JsonResponse({"report": reports.prepare(account, body(request))}, status=201)
+
+@api(["POST"], failure_title="Не удалось подать жалобу")
+def submit_report(request, account_id, report_id):
+    draft = ReportDraft.objects.filter(pk=report_id, account_id=account_id, account__owner=request.user).select_related("account").first()
+    if not draft:
+        return JsonResponse({"error": "Жалоба не найдена."}, status=404)
+    return JsonResponse({"report": reports.advance(draft, body(request))})
 
 def csrf_failure(request, reason=""):
     return JsonResponse({"error": "Сессия формы истекла. Обнови страницу и повтори."}, status=403)
