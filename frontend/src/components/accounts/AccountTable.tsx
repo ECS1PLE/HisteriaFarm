@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import type { TableColumnsType } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { ExportOutlined, FlagOutlined } from '@ant-design/icons'
 import {
   Badge,
   Button,
@@ -14,12 +15,14 @@ import AccountActions from './AccountActions'
 import AccountFilters from './AccountFilters'
 import AccountSelectionBar from './AccountSelectionBar'
 import AccountTableCaption from './AccountTableCaption'
+import BulkReportMockupModal from './BulkReportMockupModal'
 import AccountStatusBadge from '../common/AccountStatusBadge'
 import { useAccountFilters } from '../../hooks/useAccountFilters'
 import { downloadJson } from '../../utils/download'
 import type { Account } from '../../types'
 export interface AccountTableProps {
   accounts: Account[]
+  draftOwner: string
   selected: string[]
   compact: boolean
   onSelect: (ids: string[]) => void
@@ -30,6 +33,7 @@ export interface AccountTableProps {
 }
 export default function AccountTable({
   accounts,
+  draftOwner,
   selected,
   compact,
   onSelect,
@@ -39,6 +43,7 @@ export default function AccountTable({
   onLaunch,
 }: AccountTableProps) {
   const filters = useAccountFilters(accounts)
+  const [bulkReportOpen, setBulkReportOpen] = useState(false)
   const exportAccounts = () =>
     downloadJson(
       'histeria-accounts.json',
@@ -109,17 +114,23 @@ export default function AccountTable({
   ]
   return (
     <Panel className="account-panel">
+      {bulkReportOpen && <BulkReportMockupModal key={draftOwner} draftOwner={draftOwner} accounts={accounts} selected={selected} onClose={() => setBulkReportOpen(false)} />}
       <PanelHeading
         title="Все аккаунты"
         count={accounts.length}
         separateCount
         action={
-          <Button
-            icon={<ExportOutlined aria-hidden="true" />}
-            onClick={exportAccounts}
-          >
-            Экспорт
-          </Button>
+          <div className="account-heading-actions">
+            <Button icon={<FlagOutlined aria-hidden="true" />} onClick={() => setBulkReportOpen(true)}>
+              Массовый репорт
+            </Button>
+            <Button
+              icon={<ExportOutlined aria-hidden="true" />}
+              onClick={exportAccounts}
+            >
+              Экспорт
+            </Button>
+          </div>
         }
       />
       <AccountFilters

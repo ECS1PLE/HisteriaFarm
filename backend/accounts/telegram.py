@@ -51,7 +51,6 @@ def error_message(exc):
     if name in messages:
         return messages[name]
     if isinstance(exc, errors.RPCError):
-        # Return only a diagnostic identifier, never the request or its credentials/code/password.
         code = getattr(exc, "message", "") or ""
         diagnostic = code if re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) else name
         return f"Telegram отклонил операцию ({diagnostic})."
@@ -103,7 +102,6 @@ def start_login(owner, phone, group):
         raise ValidationError("Заверши или закрой предыдущие попытки входа.")
     payload = {"credentials": credentials(owner), "phone": phone, "group": str(group).strip()[:64] or "Основная"}
     async def operation():
-        # Sending the code may first return PHONE_MIGRATE: Telethon must switch DC and repeat the request.
         client = client_for(payload, request_retries=2)
         try:
             await client.connect()

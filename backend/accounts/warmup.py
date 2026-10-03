@@ -1,4 +1,3 @@
-"""Persistent scheduling for private messages between the owner's accounts."""
 import logging
 import random
 import uuid
@@ -74,7 +73,6 @@ def finish(job, status, detail=""):
 
 
 def stop(owner, job_id):
-    # Wait for an in-flight send; after this lock is acquired no new sends can begin.
     with session_lock(f"warmup-owner-{owner.pk}", blocking=True):
         job = WarmupJob.objects.filter(pk=job_id, owner=owner).first()
         if job and job.status == "running":
@@ -92,7 +90,6 @@ def send_message(sender, recipient, text, deadline):
                 await client.connect()
                 if not await client.is_user_authorized():
                     raise telegram.TelegramFailure("Сессия отозвана. Добавь аккаунт заново.", 409)
-                # Resolve using the sender's session: access hashes from another session are invalid.
                 if recipient.username:
                     resolved = await client(functions.contacts.ResolveUsernameRequest(recipient.username))
                 else:
@@ -132,13 +129,11 @@ def tick():
                     if participant.next_message_at > now:
                         continue
                     recipient = random.choice([p.account for p in participants if p.account_id != participant.account_id])
-                    # Persist before the external action: a worker restart never replays an uncertain send.
                     participant.next_message_at = next_message_time(now)
                     participant.save(update_fields=["next_message_at"])
                     try:
                         sent = send_message(participant.account, recipient, random.choice(job.messages), job.ends_at)
                     except ValidationError:
-                        # An interactive operation owns this session. Defer until the next scheduled slot.
                         telegram.record(job.owner, "Сообщение отложено", f"{participant.account.first_name}: аккаунт занят", "warning")
                         continue
                     except (telegram.TelegramFailure, errors.RPCError, OSError, TimeoutError, ValueError) as exc:
@@ -146,17 +141,14 @@ def tick():
                         finish(job, "failed", f"{participant.account.first_name}: {detail}")
                         break
                     except Exception as exc:
-                        # Malformed/encrypted sessions must not keep a task running indefinitely.
                         logger.error("Warmup send failed (%s)", type(exc).__name__)
                         finish(job, "failed", f"{participant.account.first_name}: не удалось отправить сообщение. Проверь сессию аккаунта.")
                         break
                     if sent:
                         participant.sent += 1
-                        # Base the next interval on completion, including connection time.
                         participant.next_message_at = next_message_time(timezone.now())
                         participant.save(update_fields=["sent", "next_message_at"])
                         telegram.record(job.owner, "Сообщение отправлено", f"{participant.account.first_name} → {recipient.first_name}", "success")
-                    # Release the owner lock between sends so a stop does not wait for the whole group.
                     break
         except ValidationError:
             continue

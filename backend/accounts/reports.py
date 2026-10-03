@@ -133,12 +133,10 @@ def advance(draft, data):
                         peer = getattr(types, constructor)(**saved)
                     else:
                         if isinstance(payload["peer"], int):
-                            # StringSession does not persist an entity cache. Load accessible dialogs.
                             await client.get_dialogs()
                         peer = await client.get_input_entity(payload["peer"])
                         if not isinstance(peer, (types.InputPeerUser, types.InputPeerChannel, types.InputPeerChat)):
                             raise telegram.TelegramFailure("Этот тип цели не поддерживает жалобу в панели.")
-                        # Bind all later steps to the same entity even if its username changes.
                         payload["resolvedPeer"] = peer.to_dict()
                 except ValueError:
                     raise telegram.TelegramFailure("Цель недоступна этому аккаунту. Проверь username и доступ к чату.") from None
@@ -170,7 +168,6 @@ def advance(draft, data):
             else:
                 raise telegram.TelegramFailure("Неожиданный ответ Telegram. Приём жалобы не подтверждён.")
         except Exception:
-            # Persist before re-raising: a timeout/crash must never cause automatic replay.
             draft.state = "failed"
             draft.save(update_fields=["state"])
             raise

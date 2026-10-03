@@ -62,3 +62,12 @@ class WarmupParticipant(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["job", "account"], name="unique_warmup_participant")]
+
+class User(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    username = models.CharField(max_length=32, unique=True)
+    password = models.CharField(max_length=128)
+    email = models.EmailField(unique=True)
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+    date_joined = models.DateTimeField(auto_now_add=True)

@@ -141,6 +141,7 @@ export default function DashboardPage() {
       {dashboard.page === 'accounts' && (
         <AccountsView
           accounts={dashboard.accounts}
+          draftOwner={dashboard.session.username ?? ''}
           selected={dashboard.selected}
           compact={dashboard.preferences.compact}
           onSelect={dashboard.setSelected}
