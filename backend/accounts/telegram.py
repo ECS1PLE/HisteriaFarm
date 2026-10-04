@@ -25,6 +25,17 @@ def error_message(exc):
         "PasswordHashInvalidError": "Неверный пароль двухэтапной проверки.",
         "PhoneNumberInvalidError": "Telegram не принял номер телефона.",
         "PhoneNumberBannedError": "Номер заблокирован Telegram.",
+        "PhoneNumberFloodError": "Telegram временно ограничил запросы кода для этого номера. Подожди и повтори позже.",
+        "PhonePasswordFloodError": "Telegram временно ограничил попытки входа для этого номера. Подожди и повтори позже.",
+        "PhoneNumberUnoccupiedError": "На этом номере нет зарегистрированного аккаунта Telegram. Сначала создай его в официальном приложении.",
+        "PhoneNotOccupiedError": "На этом номере нет зарегистрированного аккаунта Telegram. Сначала создай его в официальном приложении.",
+        "PhoneNumberAppSignupForbiddenError": "Telegram не разрешает регистрацию номера через это приложение. Сначала создай аккаунт в официальном Telegram.",
+        "SendCodeUnavailableError": "Telegram сейчас не может отправить код входа. Подожди и начни вход заново.",
+        "SmsCodeCreateFailedError": "Telegram не смог создать SMS-код. Попробуй войти в официальном приложении Telegram.",
+        "AuthRestartError": "Telegram просит начать вход заново. Закрой эту попытку и запроси новый код позже.",
+        "PhoneHashExpiredError": "Попытка входа истекла. Начни вход заново.",
+        "PhoneCodeEmptyError": "Введи код подтверждения.",
+        "ApiIdPublishedFloodError": "Telegram отключил этот API ID. Укажи действующие API ID и API Hash своего приложения в настройках панели.",
         "UsernameOccupiedError": "Этот username уже занят.",
         "UsernameInvalidError": "Telegram не принял username.",
         "UsernamePurchaseAvailableError": "Этот username доступен только для покупки.",
@@ -36,7 +47,14 @@ def error_message(exc):
     }
     if isinstance(exc, (TimeoutError, OSError)):
         return "Не удалось подключиться к Telegram. Проверь сеть и повтори."
-    return messages.get(type(exc).__name__, "Telegram отклонил операцию. Проверь профиль и повтори позже.")
+    name = type(exc).__name__
+    if name in messages:
+        return messages[name]
+    if isinstance(exc, errors.RPCError):
+        code = getattr(exc, "message", "") or ""
+        diagnostic = code if re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) else name
+        return f"Telegram отклонил операцию ({diagnostic})."
+    return "Не удалось выполнить операцию Telegram. Повтори позже."
 
 def credentials(owner):
     row = TelegramSettings.objects.filter(owner=owner).first()
@@ -57,9 +75,9 @@ def run(coro):
     except (errors.RPCError, OSError, TimeoutError) as exc:
         raise TelegramFailure(error_message(exc)) from None
 
-def client_for(payload):
+def client_for(payload, *, request_retries=0):
     c = payload["credentials"]
-    return TelegramClient(StringSession(payload.get("session", "")), c["apiId"], c["apiHash"], connection_retries=1, request_retries=0, flood_sleep_threshold=0, timeout=15)
+    return TelegramClient(StringSession(payload.get("session", "")), c["apiId"], c["apiHash"], connection_retries=1, request_retries=request_retries, raise_last_call_error=True, flood_sleep_threshold=0, timeout=15)
 
 async def read_profile(client):
     me = await client.get_me()
@@ -84,7 +102,7 @@ def start_login(owner, phone, group):
         raise ValidationError("Заверши или закрой предыдущие попытки входа.")
     payload = {"credentials": credentials(owner), "phone": phone, "group": str(group).strip()[:64] or "Основная"}
     async def operation():
-        client = client_for(payload)
+        client = client_for(payload, request_retries=2)
         try:
             await client.connect()
             sent = await client.send_code_request(phone)
@@ -105,7 +123,7 @@ def finish_login(owner, attempt_id, code="", password=""):
             raise TelegramFailure("Попытка входа истекла. Запроси новый код.", 410)
         payload = decrypt(row.payload)
         async def operation():
-            client = client_for(payload)
+            client = client_for(payload, request_retries=2)
             try:
                 await client.connect()
                 if payload.get("passwordRequired"):

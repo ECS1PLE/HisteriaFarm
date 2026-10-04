@@ -3,6 +3,7 @@ import { ReloadOutlined } from '@ant-design/icons'
 import { Button, Drawer, Field, Notice } from '../UI'
 import ProfileEditor from './ProfileEditor'
 import AccountProfile from './AccountProfile'
+import { ReportAccountAction } from './ReportModal'
 import GroupSelect from '../common/GroupSelect'
 import type { Account, Task } from '../../types'
 interface Props {
@@ -90,6 +91,7 @@ export default function AccountDetailsDrawer({
             onBusy={onBusy}
           />
           <div className="detail-actions">
+            <ReportAccountAction key={account.id} account={account} busy={busy} onBusy={onBusy} onReported={onSaved} />
             <Button
               block
               icon={<ReloadOutlined aria-hidden="true" />}

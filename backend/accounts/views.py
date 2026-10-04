@@ -8,11 +8,11 @@ from django.db import IntegrityError
 from django.http import JsonResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
-from .models import Account, Activity, LoginAttempt, TelegramSettings
+from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob, ReportDraft, PublicationBatch
 from .security import encrypt, session_lock
-from . import telegram
+from . import telegram, warmup, reports, publications
 
-def api(methods, public=False):
+def api(methods, public=False, failure_title=None):
     def decorate(view):
         @wraps(view)
         def wrapped(request, *args, **kwargs):
@@ -25,6 +25,8 @@ def api(methods, public=False):
             except ValidationError as exc:
                 return JsonResponse({"error": " ".join(exc.messages)}, status=400)
             except telegram.TelegramFailure as exc:
+                if failure_title:
+                    telegram.record(request.user, failure_title, str(exc), "warning")
                 return JsonResponse({"error": str(exc)}, status=exc.status)
             except (ValueError, TypeError, json.JSONDecodeError):
                 return JsonResponse({"error": "Некорректные данные запроса."}, status=400)
@@ -90,11 +92,24 @@ def telegram_settings(request):
 @api(["GET"])
 def workspace(request):
     events = Activity.objects.filter(owner=request.user).order_by("-created_at")[:100]
-    return JsonResponse({"accounts": [serialize(a) for a in Account.objects.filter(owner=request.user).order_by("-last_active")], "tasks": [], "events": [
+    return JsonResponse({"accounts": [serialize(a) for a in Account.objects.filter(owner=request.user).order_by("-last_active")], "tasks": [],
+        "warmups": [warmup.serialize(job) for job in WarmupJob.objects.filter(owner=request.user).order_by("-started_at")[:20]],
+        "warmupWorkerOnline": warmup.worker_online(), "events": [
         {"id": str(e.pk), "title": e.title, "detail": e.detail, "type": e.type, "time": e.created_at.strftime("%d.%m %H:%M")} for e in events
     ]})
 
 @api(["POST"])
+def start_warmup(request):
+    return JsonResponse({"warmup": warmup.serialize(warmup.start(request.user, body(request)))}, status=201)
+
+@api(["POST"])
+def stop_warmup(request, job_id):
+    job = warmup.stop(request.user, job_id)
+    if not job:
+        return JsonResponse({"error": "Задача не найдена."}, status=404)
+    return JsonResponse({"warmup": warmup.serialize(job)})
+
+@api(["POST"], failure_title="Не удалось запросить код Telegram")
 def start_login(request):
     data = body(request)
     key = f"send-code:{request.user.pk}"
@@ -104,7 +119,7 @@ def start_login(request):
     cache.set(key, True, 60)
     return JsonResponse(result)
 
-@api(["POST", "DELETE"])
+@api(["POST", "DELETE"], failure_title="Не удалось подтвердить вход Telegram")
 def finish_login(request, attempt_id):
     if request.method == "DELETE":
         with session_lock(f"auth-{attempt_id}"):
@@ -157,6 +172,37 @@ def avatar(request, account_id):
     response["Cache-Control"] = "private, no-store"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+@api(["GET", "POST"])
+def prepare_report(request, account_id):
+    account = own_account(request, account_id)
+    if not account:
+        return JsonResponse({"error": "Аккаунт не найден."}, status=404)
+    if request.method == "GET":
+        return JsonResponse({"reasons": [{"value": key, "label": value[0]} for key, value in reports.REASONS.items()]})
+    return JsonResponse({"report": reports.prepare(account, body(request))}, status=201)
+
+@api(["POST"], failure_title="Не удалось подать жалобу")
+def submit_report(request, account_id, report_id):
+    draft = ReportDraft.objects.filter(pk=report_id, account_id=account_id, account__owner=request.user).select_related("account").first()
+    if not draft:
+        return JsonResponse({"error": "Жалоба не найдена."}, status=404)
+    return JsonResponse({"report": reports.advance(draft, body(request))})
+
+@api(["POST"])
+def prepare_publication(request):
+    return JsonResponse({"publication": publications.serialize(publications.prepare(request.user, body(request)))}, status=201)
+
+@api(["GET", "DELETE"])
+def publication_detail(request, batch_id):
+    batch = publications.cancel(request.user, batch_id) if request.method == "DELETE" else PublicationBatch.objects.filter(pk=batch_id, owner=request.user).first()
+    if not batch:
+        return JsonResponse({"error": "Публикация не найдена."}, status=404)
+    return JsonResponse({"publication": publications.serialize(batch)})
+
+@api(["POST"])
+def publication_delivery(request, batch_id, delivery_id):
+    return JsonResponse(publications.deliver(request.user, batch_id, delivery_id, body(request)))
 
 def csrf_failure(request, reason=""):
     return JsonResponse({"error": "Сессия формы истекла. Обнови страницу и повтори."}, status=403)

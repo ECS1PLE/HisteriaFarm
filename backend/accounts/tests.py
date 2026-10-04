@@ -1,9 +1,10 @@
+import asyncio
 import io
 import json
 import uuid
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -11,8 +12,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.utils import timezone
 from PIL import Image
-from telethon import functions, errors
-from .models import Account, LoginAttempt, TelegramSettings
+from telethon import functions, errors, types
+from .models import Account, Activity, LoginAttempt, TelegramSettings
 from .security import encrypt, decrypt, session_lock
 from . import telegram
 
@@ -95,6 +96,77 @@ class ApiTests(TestCase):
         self.assertEqual(decrypt(raw)["apiId"], 777)
     def test_phone_validation(self):
         self.assertEqual(self.post("/api/telegram/login/", {"phone": "bad"}).status_code, 400)
+    def test_reported_international_number_reaches_telegram(self):
+        fake = FakeClient()
+        seen = []
+        async def send_code(phone):
+            seen.append(phone)
+            return SimpleNamespace(phone_code_hash="private-hash", type=SimpleNamespace())
+        fake.send_code_request = send_code
+        with patch("accounts.telegram.client_for", return_value=fake) as factory:
+            response = self.post("/api/telegram/login/", {"phone": "+19032630326"})
+            self.assertEqual(factory.call_args.kwargs["request_retries"], 2)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, ["+19032630326"])
+        self.assertEqual(response.json()["step"], "code")
+        self.assertTrue(fake.disconnected)
+    def test_login_client_can_repeat_request_after_datacenter_migration(self):
+        async def operation():
+            client = telegram.client_for({"credentials": self.creds, "session": ""}, request_retries=2)
+            client.is_user_authorized = AsyncMock(return_value=False)
+            client._switch_dc = AsyncMock()
+            result = SimpleNamespace(phone_code_hash="private-hash")
+            sender = SimpleNamespace(send=AsyncMock(side_effect=[errors.PhoneMigrateError(None, capture=4), result]))
+            request = functions.auth.SendCodeRequest("+19032630326", self.creds["apiId"], self.creds["apiHash"], types.CodeSettings())
+            response = await client._call(sender, request)
+            self.assertIs(response, result)
+            self.assertEqual(sender.send.call_count, 2)
+            client._switch_dc.assert_awaited_once_with(4)
+        asyncio.run(operation())
+    def test_rpc_error_is_preserved_after_datacenter_migration_without_retries(self):
+        async def operation():
+            client = telegram.client_for({"credentials": self.creds, "session": ""})
+            client.is_user_authorized = AsyncMock(return_value=False)
+            client._switch_dc = AsyncMock()
+            sender = SimpleNamespace(send=AsyncMock(side_effect=errors.PhoneMigrateError(None, capture=4)))
+            request = functions.auth.SendCodeRequest("+19032630326", self.creds["apiId"], self.creds["apiHash"], types.CodeSettings())
+            with self.assertRaises(errors.PhoneMigrateError):
+                await client._call(sender, request)
+            self.assertEqual(sender.send.call_count, 1)
+        asyncio.run(operation())
+    def test_login_failure_is_explained_and_recorded_without_credentials(self):
+        fake = FakeClient()
+        async def send_code(phone):
+            raise errors.PhoneNumberFloodError(None)
+        fake.send_code_request = send_code
+        with patch("accounts.telegram.client_for", return_value=fake):
+            response = self.post("/api/telegram/login/", {"phone": "+19032630326"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ограничил запросы кода", response.json()["error"])
+        self.assertFalse(LoginAttempt.objects.exists())
+        event = Activity.objects.get(title="Не удалось запросить код Telegram")
+        self.assertEqual(event.owner, self.user)
+        self.assertEqual(event.detail, response.json()["error"])
+        self.assertNotIn("private-session", event.detail)
+        self.assertTrue(fake.disconnected)
+    def test_unknown_rpc_error_uses_safe_diagnostic_identifier(self):
+        request = functions.auth.SignInRequest(phone_number="+19032630326", phone_code_hash="private-hash", phone_code="12345")
+        error = errors.RPCError(request, "UPDATE_APP_TO_LOGIN", code=406)
+        self.assertEqual(telegram.error_message(error), "Telegram отклонил операцию (UPDATE_APP_TO_LOGIN).")
+        unsafe = errors.RPCError(request, "private-hash 12345", code=400)
+        self.assertEqual(telegram.error_message(unsafe), "Telegram отклонил операцию (RPCError).")
+    def test_login_errors_have_specific_messages(self):
+        cases = [
+            (errors.PhoneNumberUnoccupiedError(None), "нет зарегистрированного"),
+            (errors.PhoneNumberBannedError(None), "заблокирован"),
+            (errors.SendCodeUnavailableError(None), "не может отправить"),
+            (errors.SmsCodeCreateFailedError(None), "SMS-код"),
+            (errors.ApiIdPublishedFloodError(None), "API ID"),
+            (errors.AuthRestartError(None), "начать вход заново"),
+        ]
+        for exc, expected in cases:
+            with self.subTest(error=type(exc).__name__):
+                self.assertIn(expected, telegram.error_message(exc))
     def test_login_code_and_two_factor(self):
         self.account.delete()
         fake = FakeClient(two_factor=True)
