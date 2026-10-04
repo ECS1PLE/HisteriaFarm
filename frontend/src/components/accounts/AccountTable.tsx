@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableColumnsType } from 'antd'
-import { ExportOutlined, FlagOutlined } from '@ant-design/icons'
+import { ExportOutlined, FlagOutlined, SendOutlined } from '@ant-design/icons'
 import {
   Badge,
   Button,
@@ -16,6 +16,7 @@ import AccountFilters from './AccountFilters'
 import AccountSelectionBar from './AccountSelectionBar'
 import AccountTableCaption from './AccountTableCaption'
 import BulkReportMockupModal from './BulkReportMockupModal'
+import OwnedPublicationModal from './OwnedPublicationModal'
 import AccountStatusBadge from '../common/AccountStatusBadge'
 import { useAccountFilters } from '../../hooks/useAccountFilters'
 import { downloadJson } from '../../utils/download'
@@ -30,6 +31,7 @@ export interface AccountTableProps {
   onDelete: (account: Account) => void
   onCheck: (account?: Account) => void
   onLaunch: () => void
+  onPublished: () => Promise<void>
 }
 export default function AccountTable({
   accounts,
@@ -41,9 +43,11 @@ export default function AccountTable({
   onDelete,
   onCheck,
   onLaunch,
+  onPublished,
 }: AccountTableProps) {
   const filters = useAccountFilters(accounts)
   const [bulkReportOpen, setBulkReportOpen] = useState(false)
+  const [publicationOpen, setPublicationOpen] = useState(false)
   const exportAccounts = () =>
     downloadJson(
       'histeria-accounts.json',
@@ -115,12 +119,16 @@ export default function AccountTable({
   return (
     <Panel className="account-panel">
       {bulkReportOpen && <BulkReportMockupModal key={draftOwner} draftOwner={draftOwner} accounts={accounts} selected={selected} onClose={() => setBulkReportOpen(false)} />}
+      {publicationOpen && <OwnedPublicationModal accounts={accounts} selected={selected} onClose={() => setPublicationOpen(false)} onPublished={onPublished} />}
       <PanelHeading
         title="Все аккаунты"
         count={accounts.length}
         separateCount
         action={
           <div className="account-heading-actions">
+            <Button icon={<SendOutlined aria-hidden="true" />} disabled={!accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationOpen(true)}>
+              Сообщения / комментарии
+            </Button>
             <Button icon={<FlagOutlined aria-hidden="true" />} onClick={() => setBulkReportOpen(true)}>
               Массовый репорт
             </Button>

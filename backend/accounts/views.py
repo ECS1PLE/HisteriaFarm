@@ -8,9 +8,9 @@ from django.db import IntegrityError
 from django.http import JsonResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
-from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob, ReportDraft
+from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob, ReportDraft, PublicationBatch
 from .security import encrypt, session_lock
-from . import telegram, warmup, reports
+from . import telegram, warmup, reports, publications
 
 def api(methods, public=False, failure_title=None):
     def decorate(view):
@@ -188,6 +188,21 @@ def submit_report(request, account_id, report_id):
     if not draft:
         return JsonResponse({"error": "Жалоба не найдена."}, status=404)
     return JsonResponse({"report": reports.advance(draft, body(request))})
+
+@api(["POST"])
+def prepare_publication(request):
+    return JsonResponse({"publication": publications.serialize(publications.prepare(request.user, body(request)))}, status=201)
+
+@api(["GET", "DELETE"])
+def publication_detail(request, batch_id):
+    batch = publications.cancel(request.user, batch_id) if request.method == "DELETE" else PublicationBatch.objects.filter(pk=batch_id, owner=request.user).first()
+    if not batch:
+        return JsonResponse({"error": "Публикация не найдена."}, status=404)
+    return JsonResponse({"publication": publications.serialize(batch)})
+
+@api(["POST"])
+def publication_delivery(request, batch_id, delivery_id):
+    return JsonResponse(publications.deliver(request.user, batch_id, delivery_id, body(request)))
 
 def csrf_failure(request, reason=""):
     return JsonResponse({"error": "Сессия формы истекла. Обнови страницу и повтори."}, status=403)

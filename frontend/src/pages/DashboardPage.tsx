@@ -149,6 +149,7 @@ export default function DashboardPage() {
           onDelete={dashboard.deleteAccount}
           onCheck={dashboard.checkAccounts}
           onLaunch={dashboard.openLaunch}
+          onPublished={dashboard.refresh}
           config={dashboard.config}
           events={dashboard.events}
           showActivity={dashboard.preferences.showActivity}

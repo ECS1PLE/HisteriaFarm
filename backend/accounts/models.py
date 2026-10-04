@@ -42,6 +42,26 @@ class ReportDraft(models.Model):
     state = models.CharField(max_length=16, default="confirm")
     expires = models.DateTimeField()
 
+class PublicationBatch(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    payload = models.TextField()
+    expires = models.DateTimeField()
+    cancelled = models.BooleanField(default=False)
+    error = models.CharField(max_length=255, blank=True)
+
+class PublicationDelivery(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(PublicationBatch, on_delete=models.CASCADE, related_name="deliveries")
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    target_index = models.PositiveIntegerField()
+    state = models.CharField(max_length=16, default="pending")
+    message_id = models.PositiveIntegerField(null=True)
+    error = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["batch", "account", "target_index"], name="one_publication_per_account_target")]
+
 class WarmupJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
