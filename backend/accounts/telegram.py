@@ -49,6 +49,11 @@ def error_message(exc):
         "UserIsBlockedError": "Telegram не разрешает отправку: пользователь заблокирован.",
         "YouBlockedUserError": "Этот получатель заблокирован отправителем в Telegram.",
         "PeerFloodError": "Telegram ограничил отправку сообщений. Проверь спамблок аккаунта.",
+        "ReactionInvalidError": "Эта реакция недоступна в выбранном чате.",
+        "ReactionsTooManyError": "Telegram достиг лимита разных реакций на этом сообщении.",
+        "MessageIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
+        "MsgIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
+        "ChannelPrivateError": "Этот чат недоступен аккаунту. Проверь его участие и права доступа.",
     }
     if isinstance(exc, (TimeoutError, OSError)):
         return "Не удалось подключиться к Telegram. Проверь сеть и повтори."

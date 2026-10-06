@@ -12,6 +12,8 @@ from . import telegram
 from .models import Account, PublicationBatch, PublicationDelivery
 from .security import decrypt, encrypt, session_lock
 
+REACTIONS = ("👍", "👎", "❤️", "🔥", "👏", "🎉", "🤩", "😁", "🤔", "😢", "😱", "💯")
+
 
 class PublicationStop(telegram.TelegramFailure):
     def __init__(self, message, status=400, unknown=False, *, stop_batch=False):
@@ -47,26 +49,26 @@ def parse_target(raw, mode):
 
         path = url.path.strip("/")
         invite = re.fullmatch(r"(?:\+|joinchat/)([A-Za-z0-9_-]+)", path)
-        private = re.fullmatch(r"c/([1-9]\d*)(?:/([1-9]\d*))?", path)
-        public = re.fullmatch(r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?", path)
+        private = re.fullmatch(r"c/([1-9]\d*)(?:/([1-9]\d*))?(?:/([1-9]\d*))?" if mode == "reactions" else r"c/([1-9]\d*)(?:/([1-9]\d*))?", path)
+        public = re.fullmatch(r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?(?:/([1-9]\d*))?" if mode == "reactions" else r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?", path)
 
         if invite and mode == "messages":
             locator = {"invite": invite[1]}
         elif private:
-            locator, post_id = {"channelId": int(private[1])}, private[2]
+            locator, post_id = {"channelId": int(private[1])}, (private[3] or private[2]) if mode == "reactions" else private[2]
         elif public and public[1].lower() not in (
             "share", "proxy", "socks", "login", "boost", "addstickers", "joinchat",
         ):
-            locator, post_id = {"username": public[1].lower()}, public[2]
+            locator, post_id = {"username": public[1].lower()}, (public[3] or public[2]) if mode == "reactions" else public[2]
         else:
             raise ValidationError("Ссылка не указывает на чат или пост Telegram.")
 
         if mode == "direct" and ("channelId" in locator or path.startswith("s/") or post_id):
             raise ValidationError("Для личного сообщения укажи @username, прямую ссылку на пользователя или номер телефона.")
 
-    if mode == "comments":
+    if mode in ("comments", "reactions"):
         if not post_id or int(post_id) > 2147483647:
-            raise ValidationError("Для комментария нужна ссылка на конкретный пост канала.")
+            raise ValidationError("Для реакции нужна ссылка на конкретный пост или сообщение." if mode == "reactions" else "Для комментария нужна ссылка на конкретный пост канала.")
         post_id = int(post_id)
     elif post_id:
         raise ValidationError("Для сообщения укажи ссылку на сам чат; для поста выбери «Комментарии».")
@@ -108,6 +110,15 @@ async def resolve(client, target, mode):
         raise PublicationStop("Для чатов и каналов выбери соответствующий режим; для личной переписки — «Личные сообщения».", 403)
 
     destination, reply_id = entity, None
+    if mode == "reactions":
+        message = await client.get_messages(entity, ids=target["postId"])
+        if not isinstance(message, types.Message) or message.id != target["postId"] or utils.get_peer_id(message.peer_id) != utils.get_peer_id(entity):
+            raise telegram.TelegramFailure("Сообщение удалено или недоступно этому аккаунту.")
+        return entity, target["postId"], {
+            "sourceId": utils.get_peer_id(entity), "destinationId": utils.get_peer_id(entity),
+            "replyId": target["postId"], "title": entity.title,
+            "discussionTitle": None, "messagePreview": (message.message or "Медиа без подписи")[:500],
+        }
     if mode == "comments":
         if not isinstance(entity, types.Channel) or not entity.broadcast:
             raise PublicationStop("Комментарии поддерживаются только под постами канала.")
@@ -146,6 +157,40 @@ async def resolve(client, target, mode):
     }
 
 
+async def reaction_settings(client, destination, emoji):
+    request = functions.channels.GetFullChannelRequest(destination) if isinstance(destination, types.Channel) else functions.messages.GetFullChatRequest(destination.id)
+    full = (await client(request)).full_chat
+    allowed = getattr(full, "available_reactions", None)
+    if isinstance(allowed, types.ChatReactionsNone):
+        raise telegram.TelegramFailure("В этом чате реакции отключены.")
+    if isinstance(allowed, types.ChatReactionsSome) and not any(isinstance(reaction, types.ReactionEmoji) and reaction.emoticon.replace("\ufe0f", "") == emoji.replace("\ufe0f", "") for reaction in allowed.reactions):
+        raise telegram.TelegramFailure("Эта реакция не разрешена в чате. Выбери другую.")
+    return full
+
+
+async def put_reaction(client, account, destination, message_id, emoji):
+    full = await reaction_settings(client, destination, emoji)
+    previous = getattr(full, "default_send_as", None)
+    restore = None
+    if previous and not (isinstance(previous, types.PeerUser) and previous.user_id == account.telegram_id):
+        restore = await client.get_input_entity(previous)
+        await client(functions.messages.SaveDefaultSendAsRequest(peer=destination, send_as=types.InputPeerSelf()))
+    try:
+        try:
+            result = await client(functions.messages.SendReactionRequest(
+                peer=destination, msg_id=message_id, reaction=[types.ReactionEmoji(emoticon=emoji)], big=False, add_to_recent=False,
+            ))
+        except errors.MessageNotModifiedError:
+            # Telegram confirms the requested reaction was already set.
+            return message_id
+        if not isinstance(result, (types.Updates, types.UpdatesCombined, types.UpdateShort, types.UpdatesTooLong)):
+            raise PublicationStop("Telegram не подтвердил реакцию. Автоматического повтора нет.", unknown=True)
+        return message_id
+    finally:
+        if restore is not None:
+            await client(functions.messages.SaveDefaultSendAsRequest(peer=destination, send_as=restore))
+
+
 def serialize_delivery(delivery):
     return {
         "id": str(delivery.pk),
@@ -164,11 +209,12 @@ def serialize(batch):
         "id": str(batch.pk),
         "mode": payload["mode"],
         "text": payload["text"],
+        "reaction": payload.get("reaction"),
         "expiresAt": batch.expires.isoformat(),
         "cancelled": batch.cancelled,
         "error": batch.error,
         "targets": [
-            {"link": target["link"], "title": target["title"], "discussionTitle": target["discussionTitle"]}
+            {"link": target["link"], "title": target["title"], "discussionTitle": target["discussionTitle"], "messagePreview": target.get("messagePreview")}
             for target in payload["targets"]
         ],
         "deliveries": [
@@ -180,9 +226,14 @@ def serialize(batch):
 
 def prepare(owner, data):
     mode, text, links, ids = data.get("mode"), data.get("text"), data.get("targets"), data.get("accountIds")
-    if mode not in ("messages", "comments", "direct"):
-        raise ValidationError("Выбери сообщения в чаты, комментарии или личные сообщения.")
-    if not isinstance(text, str) or not text.strip() or len(text.encode("utf-16-le")) // 2 > 4096:
+    if mode not in ("messages", "comments", "direct", "reactions"):
+        raise ValidationError("Выбери сообщения, комментарии или реакции.")
+    reaction = data.get("reaction")
+    if mode == "reactions":
+        if reaction not in REACTIONS:
+            raise ValidationError("Выбери доступную реакцию из списка.")
+        text = ""
+    elif not isinstance(text, str) or not text.strip() or len(text.encode("utf-16-le")) // 2 > 4096:
         raise ValidationError("Укажи текст до 4096 символов Telegram.")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 100:
         raise ValidationError("Выбери от 1 до 100 своих готовых аккаунтов.")
@@ -209,19 +260,29 @@ def prepare(owner, data):
 
     with session_lock(sender.pk):
         async def verify():
+            nonlocal reaction
             client = telegram.client_for(decrypt(sender.session))
             try:
                 await client.connect()
                 if not await client.is_user_authorized():
                     raise telegram.TelegramFailure("Сессия первого отправителя отозвана.", 409)
-                if mode == "direct":
+                if mode in ("direct", "reactions"):
                     me = await client.get_me()
                     if not me or me.id != sender.telegram_id or me.deleted:
                         raise telegram.TelegramFailure("Сессия первого отправителя не принадлежит выбранному аккаунту. Проверь её в панели.", 409)
 
+                if mode == "reactions":
+                    catalog = await client(functions.messages.GetAvailableReactionsRequest(hash=0))
+                    definition = next((item for item in getattr(catalog, "reactions", []) if not item.inactive and item.reaction.replace("\ufe0f", "") == reaction.replace("\ufe0f", "")), None)
+                    if not definition:
+                        raise telegram.TelegramFailure("Telegram не подтвердил доступность этой реакции. Выбери другую.")
+                    reaction = definition.reaction
+
                 seen = set()
                 for target in targets:
-                    _, _, resolved = await resolve(client, target, mode)
+                    destination, _, resolved = await resolve(client, target, mode)
+                    if mode == "reactions":
+                        await reaction_settings(client, destination, reaction)
                     key = (resolved["destinationId"], resolved["replyId"])
                     if key in seen:
                         raise ValidationError("Один получатель указан несколько раз." if mode == "direct" else "Один чат или пост указан несколько раз.")
@@ -235,7 +296,7 @@ def prepare(owner, data):
     with transaction.atomic():
         batch = PublicationBatch.objects.create(
             owner=owner,
-            payload=encrypt({"mode": mode, "text": text, "targets": targets}),
+            payload=encrypt({"mode": mode, "text": text, "reaction": reaction if mode == "reactions" else None, "targets": targets}),
             expires=timezone.now() + timedelta(hours=1),
         )
         PublicationDelivery.objects.bulk_create([
@@ -328,7 +389,7 @@ def deliver(owner, batch_id, delivery_id, data):
                         await client.connect()
                         if not await client.is_user_authorized():
                             raise telegram.TelegramFailure("Сессия отправителя отозвана.", 409)
-                        if payload["mode"] == "direct":
+                        if payload["mode"] in ("direct", "reactions"):
                             me = await client.get_me()
                             if not me or me.id != row.account.telegram_id or me.deleted:
                                 raise telegram.TelegramFailure("Сессия не принадлежит выбранному отправителю. Проверь её в панели.", 409)
@@ -336,6 +397,9 @@ def deliver(owner, batch_id, delivery_id, data):
                         destination, reply_id, resolved = await resolve(client, target, payload["mode"])
                         if any(resolved[key] != target[key] for key in ("sourceId", "destinationId", "replyId")):
                             raise PublicationStop("Адресат или обсуждение изменились. Открой новую форму.", 409, stop_batch=True)
+
+                        if payload["mode"] == "reactions":
+                            return await put_reaction(client, row.account, destination, target["postId"], payload["reaction"])
 
                         options = {"parse_mode": None, "link_preview": False}
                         if payload["mode"] != "direct":
@@ -372,5 +436,5 @@ def deliver(owner, batch_id, delivery_id, data):
             skip_sender(batch, row)
             telegram.record(owner, "Публикация не подтверждена", f"{row.account.first_name}: {row.error}", "warning")
         else:
-            telegram.record(owner, {"comments": "Комментарий отправлен", "messages": "Сообщение отправлено", "direct": "Личное сообщение отправлено"}[payload["mode"]], f"{row.account.first_name} → {target['title']}", "success")
+            telegram.record(owner, {"comments": "Комментарий отправлен", "messages": "Сообщение отправлено", "direct": "Личное сообщение отправлено", "reactions": "Реакция поставлена"}[payload["mode"]], f"{row.account.first_name} → {target['title']}" + (f" · {payload['reaction']} · сообщение {target['postId']}" if payload["mode"] == "reactions" else ""), "success")
         return delivery_result(batch, row, skipped=skipped)

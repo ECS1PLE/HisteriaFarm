@@ -1,6 +1,6 @@
 import { api } from './api'
 
-export type PublicationMode = 'messages' | 'comments' | 'direct'
+export type PublicationMode = 'messages' | 'comments' | 'direct' | 'reactions'
 
 export interface PublicationDelivery {
   id: string
@@ -22,16 +22,18 @@ export interface Publication {
   id: string
   mode: PublicationMode
   text: string
+  reaction: string | null
   expiresAt: string
   cancelled: boolean
   error: string
-  targets: { link: string; title: string; discussionTitle: string | null }[]
+  targets: { link: string; title: string; discussionTitle: string | null; messagePreview?: string | null }[]
   deliveries: PublicationDelivery[]
 }
 
 export function preparePublication(body: {
   mode: PublicationMode
   text: string
+  reaction?: string
   targets: string[]
   accountIds: string[]
 }) {
