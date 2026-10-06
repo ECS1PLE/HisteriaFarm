@@ -26,10 +26,11 @@ def serialize(job):
     return {
         "id": str(job.pk), "status": job.status,
         "startedAt": job.started_at.isoformat(), "endsAt": job.ends_at.isoformat(),
-        "error": job.error, "sent": sum(p.sent for p in participants),
+        "error": job.error, "sent": sum(p.sent for p in participants), "failures": sum(p.failures for p in participants),
         "progress": min(100, max(0, round((now - job.started_at).total_seconds() / 86400 * 100))),
         "participants": [{"accountId": str(p.account_id), "name": p.account.first_name,
-            "sent": p.sent, "nextMessageAt": p.next_message_at.isoformat() if job.status == "running" and p.next_message_at < job.ends_at else None}
+            "sent": p.sent, "failures": p.failures, "error": p.error,
+            "nextMessageAt": p.next_message_at.isoformat() if job.status == "running" and p.next_message_at < job.ends_at else None}
             for p in participants],
     }
 
@@ -138,16 +139,25 @@ def tick():
                         continue
                     except (telegram.TelegramFailure, errors.RPCError, OSError, TimeoutError, ValueError) as exc:
                         detail = str(exc) if isinstance(exc, telegram.TelegramFailure) else telegram.error_message(exc)
-                        finish(job, "failed", f"{participant.account.first_name}: {detail}")
-                        break
+                        retry_after = getattr(exc, "retry_after", 0) or (exc.seconds if isinstance(exc, errors.FloodWaitError) else 0)
+                        participant.next_message_at = max(participant.next_message_at, timezone.now() + timedelta(seconds=retry_after))
+                        participant.failures += 1
+                        participant.error = detail[:255]
+                        participant.save(update_fields=["next_message_at", "failures", "error"])
+                        telegram.record(job.owner, "Сообщение не отправлено", f"{participant.account.first_name}: {detail}", "warning")
+                        continue
                     except Exception as exc:
                         logger.error("Warmup send failed (%s)", type(exc).__name__)
-                        finish(job, "failed", f"{participant.account.first_name}: не удалось отправить сообщение. Проверь сессию аккаунта.")
-                        break
+                        participant.failures += 1
+                        participant.error = "Не удалось отправить сообщение. Проверь сессию аккаунта."
+                        participant.save(update_fields=["failures", "error"])
+                        telegram.record(job.owner, "Сообщение не отправлено", f"{participant.account.first_name}: {participant.error}", "warning")
+                        continue
                     if sent:
                         participant.sent += 1
+                        participant.error = ""
                         participant.next_message_at = next_message_time(timezone.now())
-                        participant.save(update_fields=["sent", "next_message_at"])
+                        participant.save(update_fields=["sent", "next_message_at", "error"])
                         telegram.record(job.owner, "Сообщение отправлено", f"{participant.account.first_name} → {recipient.first_name}", "success")
                     break
         except ValidationError:

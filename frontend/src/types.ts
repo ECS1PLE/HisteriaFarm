@@ -2,6 +2,14 @@ export type AccountStatus =
   'ready' | 'working' | 'waiting' | 'error' | 'offline'
 export type Mode = 'comments' | 'reactions' | 'subscriptions' | 'scenario'
 export type Page = 'accounts' | 'tasks' | 'activity'
+export type CheckKind = 'session' | 'spam' | 'all'
+export interface CheckProgress {
+  done: number
+  total: number
+  current: string
+  kind: CheckKind
+  stopping: boolean
+}
 export interface Account {
   id: string
   name: string
@@ -20,6 +28,13 @@ export interface Account {
   premium: boolean
   completed: number
   lastActive: string
+  sessionStatus: 'unchecked' | 'valid' | 'invalid' | 'error'
+  sessionCheckedAt: string | null
+  sessionError: string
+  spamStatus: 'unchecked' | 'clear' | 'restricted' | 'unknown' | 'error'
+  spamCheckedAt: string | null
+  spamDetail: string
+  checkRetryAt: string | null
 }
 export interface TaskConfig {
   mode: Mode
@@ -62,11 +77,14 @@ export interface WarmupJob {
   endsAt: string
   error: string
   sent: number
+  failures: number
   progress: number
   participants: {
     accountId: string
     name: string
     sent: number
+    failures: number
+    error: string
     nextMessageAt: string | null
   }[]
 }

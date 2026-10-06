@@ -22,6 +22,14 @@ class Account(models.Model):
     last_active = models.DateTimeField(auto_now=True)
     error = models.CharField(max_length=255, blank=True)
 
+    session_status = models.CharField(max_length=16, default="unchecked")
+    session_checked_at = models.DateTimeField(null=True, blank=True)
+    session_error = models.CharField(max_length=255, blank=True)
+    spam_status = models.CharField(max_length=16, default="unchecked")
+    spam_checked_at = models.DateTimeField(null=True, blank=True)
+    spam_detail = models.TextField(blank=True)
+    check_retry_at = models.DateTimeField(null=True, blank=True)
+
 class LoginAttempt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -79,6 +87,8 @@ class WarmupParticipant(models.Model):
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
     next_message_at = models.DateTimeField()
     sent = models.PositiveIntegerField(default=0)
+    failures = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=255, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["job", "account"], name="unique_warmup_participant")]

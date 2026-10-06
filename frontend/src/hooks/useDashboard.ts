@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { App as AntApp } from 'antd'
 import { defaultConfig } from '../data'
 import { useLocalStorage } from './useLocalStorage'
 import { api, ApiError } from '../services/api'
 import type {
   Account,
+  CheckKind,
+  CheckProgress,
   ConfigSection,
   Mode,
   Page,
@@ -21,6 +23,9 @@ export function useDashboard() {
   const [connectionError, setConnectionError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [checkProgress, setCheckProgress] = useState<CheckProgress | null>(null)
+  const checking = useRef(false)
+  const stopChecking = useRef(false)
   const [config, setConfig] = useLocalStorage<TaskConfig>(
     'histeria.config.v2',
     defaultConfig,
@@ -120,22 +125,40 @@ export function useDashboard() {
       setBusy(false)
     }
   }
-  const checkAccounts = (account?: Account) => {
+  const checkAccounts = (account?: Account, kind: CheckKind = 'all') => {
+    if (busy || checking.current) return
+    checking.current = true
+    stopChecking.current = false
     void execute(async () => {
-      const targets = account ? [account] : workspace.accounts
+      const targets = account ? [account] : selected.length
+        ? workspace.accounts.filter((item) => selected.includes(item.id))
+        : workspace.accounts
       let failures = 0
-      for (const item of targets) {
-        try {
-          await api(`accounts/${item.id}/`, { method: 'POST' })
-        } catch (e) {
-          failures++
-          message.error(
-            `${item.name}: ${e instanceof Error ? e.message : 'Ошибка'}`,
-          )
+      let done = 0
+      try {
+        for (const item of targets) {
+          if (stopChecking.current) break
+          setCheckProgress({ done, total: targets.length, current: item.name, kind, stopping: false })
+          try {
+            const result = await api<{ account: Account; errors: string[] }>(`accounts/${item.id}/check/`, { method: 'POST', body: { kind } })
+            setWorkspace((prev) => ({ ...prev, accounts: prev.accounts.map((row) => row.id === item.id ? result.account : row) }))
+            if (result.errors.length) failures++
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 401) throw e
+            failures++
+            message.error(`${item.name}: ${e instanceof Error ? e.message : 'Ошибка'}`)
+          }
+          done++
+          setCheckProgress((prev) => prev ? { ...prev, done } : null)
         }
+        await refresh()
+        const summary = `${stopChecking.current ? 'Проверка остановлена' : 'Проверка завершена'}: ${done} из ${targets.length}`
+        if (failures) message.warning(`${summary}. Ошибок: ${failures}; подробности в карточках аккаунтов.`)
+        else message.success(summary)
+      } finally {
+        checking.current = false
+        setCheckProgress(null)
       }
-      await refresh()
-      if (!failures) message.success('Проверка Telegram завершена')
     })
   }
   const deleteAccount = (account: Account) =>
@@ -193,6 +216,11 @@ export function useDashboard() {
     connectionError,
     loading,
     busy,
+    checkProgress,
+    stopChecks: () => {
+      stopChecking.current = true
+      setCheckProgress((prev) => prev ? { ...prev, stopping: true } : null)
+    },
     connect,
     refresh,
     logout,
@@ -226,7 +254,7 @@ export function useDashboard() {
     ready: accounts.filter((a) => a.status === 'ready'),
     working: accounts.filter((a) => a.status === 'working').length,
     attention: accounts.filter(
-      (a) => a.status === 'error' || a.status === 'offline',
+      (a) => a.status === 'error' || a.status === 'offline' || a.spamStatus === 'restricted' || a.spamStatus === 'error' || a.sessionStatus === 'error',
     ).length,
     activeTasks: workspace.tasks.filter(
       (t) => t.status === 'running' || t.status === 'paused',

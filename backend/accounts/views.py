@@ -7,10 +7,11 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import JsonResponse, HttpResponse
 from django.middleware.csrf import get_token
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from .models import Account, Activity, LoginAttempt, TelegramSettings, WarmupJob, ReportDraft, PublicationBatch
 from .security import encrypt, session_lock
-from . import telegram, warmup, reports, publications
+from . import telegram, warmup, reports, publications, checks
 
 def api(methods, public=False, failure_title=None):
     def decorate(view):
@@ -49,6 +50,13 @@ def serialize(account):
         "premium": account.premium, "avatarUrl": f"/api/accounts/{account.id}/avatar/?v={account.last_active.timestamp()}" if account.avatar else None,
         "proxy": "Без прокси", "country": "", "color": "#91b99a", "completed": 0,
         "lastActive": account.last_active.strftime("%d.%m %H:%M"), "error": account.error,
+        "sessionStatus": account.session_status,
+        "sessionCheckedAt": account.session_checked_at.isoformat() if account.session_checked_at else None,
+        "sessionError": account.session_error,
+        "spamStatus": account.spam_status,
+        "spamCheckedAt": account.spam_checked_at.isoformat() if account.spam_checked_at else None,
+        "spamDetail": account.spam_detail,
+        "checkRetryAt": account.check_retry_at.isoformat() if account.check_retry_at and account.check_retry_at > timezone.now() else None,
     }
 
 def own_account(request, account_id):
@@ -152,6 +160,14 @@ def account_detail(request, account_id):
     return JsonResponse({"account": serialize(account), "errors": errors})
 
 @api(["POST"])
+def check_account(request, account_id):
+    account = own_account(request, account_id)
+    if not account:
+        return JsonResponse({"error": "Аккаунт не найден."}, status=404)
+    issues = checks.check_account(account, body(request).get("kind", "all"))
+    return JsonResponse({"account": serialize(account), "errors": issues})
+
+@api(["POST"])
 def profile(request, account_id):
     account = own_account(request, account_id)
     if not account:
@@ -203,6 +219,10 @@ def publication_detail(request, batch_id):
 @api(["POST"])
 def publication_delivery(request, batch_id, delivery_id):
     return JsonResponse(publications.deliver(request.user, batch_id, delivery_id, body(request)))
+
+@api(["POST"])
+def skip_publication_account(request, batch_id, delivery_id):
+    return JsonResponse(publications.skip_delivery_account(request.user, batch_id, delivery_id, body(request)))
 
 def csrf_failure(request, reason=""):
     return JsonResponse({"error": "Сессия формы истекла. Обнови страницу и повтори."}, status=403)

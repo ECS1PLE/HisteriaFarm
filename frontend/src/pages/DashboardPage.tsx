@@ -1,7 +1,6 @@
 import {
   PlusOutlined,
   ThunderboltFilled,
-  ReloadOutlined,
 } from '@ant-design/icons'
 import { Spin } from 'antd'
 import PanelLogin from '../components/auth/PanelLogin'
@@ -12,6 +11,7 @@ import Topbar from '../components/layout/Topbar'
 import PageHeading from '../components/layout/PageHeading'
 import PageFooter from '../components/layout/PageFooter'
 import WorkspaceStats from '../components/dashboard/WorkspaceStats'
+import AccountCheckPanel from '../components/dashboard/AccountCheckPanel'
 import AccountsView from '../components/dashboard/AccountsView'
 import WorkspaceDialogs from '../components/dashboard/WorkspaceDialogs'
 import WarmupPanel from '../components/accounts/WarmupPanel'
@@ -19,7 +19,7 @@ import TasksView from '../components/tasks/TasksView'
 import ActivityView from '../components/activity/ActivityView'
 import { useDashboard } from '../hooks/useDashboard'
 const descriptions = {
-  accounts: 'Управляй аккаунтами. Создавай задачи. Держи всё под контролем.',
+  accounts: 'Сессии, ограничения и активность — всё в одном пространстве.',
   tasks: 'Все режимы работы и прогресс выполнения в одном месте.',
   activity: 'История действий и изменений в твоём пространстве.',
 }
@@ -92,14 +92,6 @@ export default function DashboardPage() {
             {dashboard.page === 'accounts' && (
               <>
                 <Button
-                  icon={<ReloadOutlined aria-hidden="true" />}
-                  loading={dashboard.busy}
-                  disabled={!dashboard.accounts.length}
-                  onClick={() => dashboard.checkAccounts()}
-                >
-                  Проверить
-                </Button>
-                <Button
                   type="primary"
                   icon={<ThunderboltFilled aria-hidden="true" />}
                   disabled={!dashboard.accounts.length || dashboard.busy}
@@ -117,14 +109,6 @@ export default function DashboardPage() {
                 </Button>
               </>
             )}
-            <Button
-              disabled
-              title="Выполнение задач ещё не подключено"
-              icon={<ThunderboltFilled aria-hidden="true" />}
-              onClick={dashboard.openLaunch}
-            >
-              Создать задачу
-            </Button>
           </>
         }
       />
@@ -135,6 +119,7 @@ export default function DashboardPage() {
         attention={dashboard.attention}
         activeTasks={dashboard.activeTasks.length + dashboard.warmups.filter((job) => job.status === 'running').length}
       />
+      {dashboard.page === 'accounts' && <AccountCheckPanel accounts={dashboard.accounts} selected={dashboard.selected} busy={dashboard.busy} progress={dashboard.checkProgress} onCheck={dashboard.checkAccounts} onStop={dashboard.stopChecks} />}
       {(dashboard.page === 'accounts' || dashboard.page === 'tasks') && (
         <WarmupPanel jobs={dashboard.warmups} workerOnline={dashboard.warmupWorkerOnline} busy={dashboard.busy} onStop={dashboard.stopWarmup} />
       )}
@@ -144,6 +129,7 @@ export default function DashboardPage() {
           draftOwner={dashboard.session.username ?? ''}
           selected={dashboard.selected}
           compact={dashboard.preferences.compact}
+          busy={dashboard.busy}
           onSelect={dashboard.setSelected}
           onDetails={(account) => dashboard.setDetailsId(account.id)}
           onDelete={dashboard.deleteAccount}

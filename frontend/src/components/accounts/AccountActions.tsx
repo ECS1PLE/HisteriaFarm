@@ -2,17 +2,20 @@ import {
   CheckCircleOutlined,
   DeleteOutlined,
   ExportOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { ActionMenu } from '../UI'
-import type { Account } from '../../types'
+import type { Account, CheckKind } from '../../types'
 interface Props {
   account: Account
+  busy: boolean
   onDetails: (account: Account) => void
-  onCheck: (account: Account) => void
+  onCheck: (account: Account, kind?: CheckKind) => void
   onDelete: (account: Account) => void
 }
 export default function AccountActions({
   account,
+  busy,
   onDetails,
   onCheck,
   onDelete,
@@ -29,10 +32,17 @@ export default function AccountActions({
         },
         {
           key: 'check',
-          label: 'Проверить в Telegram',
+          label: 'Проверить сессию',
           icon: <CheckCircleOutlined aria-hidden="true" />,
-          disabled: account.status === 'working',
-          onClick: () => onCheck(account),
+          disabled: busy || account.status === 'working',
+          onClick: () => onCheck(account, 'session'),
+        },
+        {
+          key: 'spam',
+          label: 'Проверить спамблок',
+          icon: <SafetyCertificateOutlined aria-hidden="true" />,
+          disabled: busy || account.status === 'working',
+          onClick: () => onCheck(account, 'spam'),
         },
         { type: 'divider' },
         {
@@ -40,7 +50,7 @@ export default function AccountActions({
           label: 'Удалить аккаунт',
           icon: <DeleteOutlined aria-hidden="true" />,
           danger: true,
-          disabled: account.status === 'working',
+          disabled: busy || account.status === 'working',
           onClick: () => onDelete(account),
         },
       ]}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableColumnsType } from 'antd'
-import { ExportOutlined, FlagOutlined, SendOutlined } from '@ant-design/icons'
+import { ExportOutlined, FlagOutlined, SendOutlined, MessageOutlined } from '@ant-design/icons'
 import {
   Badge,
   Button,
@@ -10,26 +10,28 @@ import {
   PanelHeading,
 } from '../UI'
 import AccountIdentity from './AccountIdentity'
-import ProxyCell from './ProxyCell'
+import AccountHealth from './AccountHealth'
 import AccountActions from './AccountActions'
 import AccountFilters from './AccountFilters'
 import AccountSelectionBar from './AccountSelectionBar'
 import AccountTableCaption from './AccountTableCaption'
 import BulkReportMockupModal from './BulkReportMockupModal'
 import OwnedPublicationModal from './OwnedPublicationModal'
+import type { PublicationMode } from '../../services/publications'
 import AccountStatusBadge from '../common/AccountStatusBadge'
 import { useAccountFilters } from '../../hooks/useAccountFilters'
 import { downloadJson } from '../../utils/download'
-import type { Account } from '../../types'
+import type { Account, CheckKind } from '../../types'
 export interface AccountTableProps {
   accounts: Account[]
   draftOwner: string
   selected: string[]
   compact: boolean
+  busy: boolean
   onSelect: (ids: string[]) => void
   onDetails: (account: Account) => void
   onDelete: (account: Account) => void
-  onCheck: (account?: Account) => void
+  onCheck: (account?: Account, kind?: CheckKind) => void
   onLaunch: () => void
   onPublished: () => Promise<void>
 }
@@ -38,6 +40,7 @@ export default function AccountTable({
   draftOwner,
   selected,
   compact,
+  busy,
   onSelect,
   onDetails,
   onDelete,
@@ -47,7 +50,7 @@ export default function AccountTable({
 }: AccountTableProps) {
   const filters = useAccountFilters(accounts)
   const [bulkReportOpen, setBulkReportOpen] = useState(false)
-  const [publicationOpen, setPublicationOpen] = useState(false)
+  const [publicationMode, setPublicationMode] = useState<PublicationMode | null>(null)
   const exportAccounts = () =>
     downloadJson(
       'histeria-accounts.json',
@@ -85,10 +88,16 @@ export default function AccountTable({
       render: (value) => <AccountStatusBadge status={value} />,
     },
     {
-      title: 'ПРОКСИ',
-      dataIndex: 'proxy',
-      width: 166,
-      render: (_, account) => <ProxyCell account={account} />,
+      title: 'СЕССИЯ',
+      key: 'session',
+      width: 185,
+      render: (_, account) => <AccountHealth account={account} kind="session" />,
+    },
+    {
+      title: 'СПАМБЛОК',
+      key: 'spam',
+      width: 190,
+      render: (_, account) => <AccountHealth account={account} kind="spam" />,
     },
     {
       title: 'ГРУППА',
@@ -109,6 +118,7 @@ export default function AccountTable({
       render: (_, account) => (
         <AccountActions
           account={account}
+          busy={busy}
           onDetails={onDetails}
           onCheck={onCheck}
           onDelete={onDelete}
@@ -119,14 +129,17 @@ export default function AccountTable({
   return (
     <Panel className="account-panel">
       {bulkReportOpen && <BulkReportMockupModal key={draftOwner} draftOwner={draftOwner} accounts={accounts} selected={selected} onClose={() => setBulkReportOpen(false)} />}
-      {publicationOpen && <OwnedPublicationModal accounts={accounts} selected={selected} onClose={() => setPublicationOpen(false)} onPublished={onPublished} />}
+      {publicationMode && <OwnedPublicationModal accounts={accounts} selected={selected} initialMode={publicationMode} onClose={() => setPublicationMode(null)} onPublished={onPublished} />}
       <PanelHeading
         title="Все аккаунты"
         count={accounts.length}
         separateCount
         action={
           <div className="account-heading-actions">
-            <Button icon={<SendOutlined aria-hidden="true" />} disabled={!accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationOpen(true)}>
+            <Button icon={<MessageOutlined aria-hidden="true" />} disabled={busy || !accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationMode('direct')}>
+              В личку
+            </Button>
+            <Button icon={<SendOutlined aria-hidden="true" />} disabled={busy || !accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationMode('messages')}>
               Сообщения / комментарии
             </Button>
             <Button icon={<FlagOutlined aria-hidden="true" />} onClick={() => setBulkReportOpen(true)}>
@@ -175,7 +188,7 @@ export default function AccountTable({
           showTotal: (total, range) =>
             `${range[0]}–${range[1]} из ${total} аккаунтов`,
         }}
-        scroll={{ x: 1050 }}
+        scroll={{ x: 1210 }}
         locale={{ emptyText: <EmptyState description="Аккаунты не найдены" /> }}
       />
       <AccountTableCaption />

@@ -177,16 +177,17 @@ class PublicationTests(TestCase):
         self.assertTrue(self.send(batch, row).json()["stop"])
         self.assertEqual(self.sender_client.sent, [])
 
-    def test_flood_wait_or_unknown_result_stops_the_queue_without_replay(self):
+    def test_flood_wait_or_unknown_result_skips_sender_without_replay(self):
         for error, state in ((errors.FloodWaitError(None, capture=30), "failed"), (errors.SlowModeWaitError(None, capture=10), "failed"), (TimeoutError(), "unknown")):
             batch = self.prepare()
             self.owner_client.send_error = error
             row = next(row for row in batch["deliveries"] if row["accountId"] == str(self.verifier.pk))
             response = self.send(batch, row).json()
             self.assertEqual(response["delivery"]["state"], state)
-            self.assertTrue(response["stop"])
+            self.assertFalse(response["stop"])
             self.assertEqual(self.send(batch, row).json()["delivery"]["state"], state)
-            self.assertTrue(PublicationDelivery.objects.filter(batch_id=batch["id"], state="skipped").exists())
+            other = next(row for row in batch["deliveries"] if row["accountId"] == str(self.sender.pk))
+            self.assertEqual(self.send(batch, other).json()["delivery"]["state"], "sent")
             self.owner_client.send_error = None
         self.assertEqual(self.owner_client.sent, [])
 
@@ -199,7 +200,7 @@ class PublicationTests(TestCase):
             self.assertEqual(self.post("/api/publications/", {**self.data, "targets": ["https://t.me/+notJoined"]}).status_code, 400)
         self.assertEqual(batch["targets"][0]["title"], "Чат 101")
 
-    def test_request_timeout_outside_operation_also_stops_the_queue(self):
+    def test_request_timeout_outside_operation_also_skips_only_sender(self):
         batch = self.prepare()
         async def timeout(coroutine, timeout):
             coroutine.close()
@@ -207,7 +208,9 @@ class PublicationTests(TestCase):
         with patch("accounts.telegram.asyncio.wait_for", side_effect=timeout):
             response = self.send(batch, batch["deliveries"][0]).json()
         self.assertEqual(response["delivery"]["state"], "unknown")
-        self.assertTrue(response["stop"])
+        self.assertFalse(response["stop"])
+        other = next(row for row in batch["deliveries"] if row["accountId"] != batch["deliveries"][0]["accountId"])
+        self.assertEqual(self.send(batch, other).json()["delivery"]["state"], "sent")
 
     def test_sender_permission_failure_does_not_repeat_or_block_other_senders(self):
         batch = self.prepare()
@@ -246,7 +249,7 @@ class PublicationTests(TestCase):
         PublicationDelivery.objects.filter(pk=row["id"]).update(state="sending")
         response = self.send(batch, row).json()
         self.assertEqual(response["delivery"]["state"], "unknown")
-        self.assertTrue(response["stop"])
+        self.assertFalse(response["stop"])
         self.assertEqual(self.owner_client.sent, [])
 
     def test_batch_access_csrf_and_session_lock(self):
@@ -256,12 +259,38 @@ class PublicationTests(TestCase):
         self.assertEqual(self.client.delete(f"/api/publications/{batch['id']}/").status_code, 404)
         self.assertEqual(self.send(batch, batch["deliveries"][0]).status_code, 404)
         self.client.force_login(self.owner)
-        with session_lock(self.verifier.pk):
-            self.assertEqual(self.send(batch, batch["deliveries"][0]).status_code, 400)
+        with session_lock(batch["deliveries"][0]["accountId"]):
+            response = self.send(batch, batch["deliveries"][0])
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["delivery"]["state"], "failed")
+            self.assertFalse(response.json()["stop"])
         browser = Client(enforce_csrf_checks=True)
         self.assertEqual(browser.get(f"/api/publications/{batch['id']}/").status_code, 401)
         browser.force_login(self.owner)
         self.assertEqual(browser.post("/api/publications/", json.dumps(self.data), content_type="application/json").status_code, 403)
+
+    def test_comment_sender_failure_skips_remaining_posts_and_continues_next_account(self):
+        self.owner_client.source = channel(broadcast=True)
+        self.sender_client.source = channel(creator=False, broadcast=True)
+        # Each post resolves to a distinct reply root in the same group.
+        original_owner_call = self.owner_client.__class__.__call__
+        async def discussion(client, request):
+            if isinstance(request, functions.messages.GetDiscussionMessageRequest):
+                client.root_id = request.msg_id
+            return await original_owner_call(client, request)
+        with patch.object(PublicationClient, "__call__", discussion):
+            batch = self.prepare({**self.data, "mode": "comments", "targets": ["https://t.me/my_channel/123", "https://t.me/my_channel/124"]})
+            self.owner_client.send_error = errors.FloodWaitError(None, capture=30)
+            first = next(row for row in batch["deliveries"] if row["accountId"] == str(self.verifier.pk))
+            result = self.send(batch, first).json()
+            self.assertFalse(result["stop"])
+            self.assertEqual(result["skippedAccountId"], str(self.verifier.pk))
+            for row in batch["deliveries"]:
+                if row["accountId"] == str(self.sender.pk):
+                    self.assertEqual(self.send(batch, row).json()["delivery"]["state"], "sent")
+            rest = next(row for row in batch["deliveries"] if row["accountId"] == str(self.verifier.pk) and row["id"] != first["id"])
+            self.assertEqual(self.send(batch, rest).json()["delivery"]["state"], "skipped")
+        self.assertEqual(len(self.sender_client.sent), 2)
 
     def test_input_validation_and_alias_duplicates(self):
         invalid = [

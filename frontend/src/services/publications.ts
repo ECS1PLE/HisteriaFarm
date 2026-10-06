@@ -1,6 +1,6 @@
 import { api } from './api'
 
-export type PublicationMode = 'messages' | 'comments'
+export type PublicationMode = 'messages' | 'comments' | 'direct'
 
 export interface PublicationDelivery {
   id: string
@@ -10,6 +10,12 @@ export interface PublicationDelivery {
   state: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped'
   messageId: number | null
   error: string
+}
+
+export interface DeliveryResult {
+  delivery: PublicationDelivery
+  stop: boolean
+  skippedAccountId?: string | null
 }
 
 export interface Publication {
@@ -41,8 +47,14 @@ export function cancelPublication(id: string) {
 }
 
 export function sendPublicationDelivery(batchId: string, deliveryId: string) {
-  return api<{ delivery: PublicationDelivery; stop: boolean }>(
+  return api<DeliveryResult>(
     `publications/${batchId}/deliveries/${deliveryId}/`,
     { method: 'POST', body: { confirmed: true } },
   )
+}
+
+export function skipPublicationAccount(batchId: string, deliveryId: string) {
+  return api<DeliveryResult>(`publications/${batchId}/deliveries/${deliveryId}/skip-account/`, {
+    method: 'POST', body: { confirmed: true },
+  })
 }

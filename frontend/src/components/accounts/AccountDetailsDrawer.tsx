@@ -1,11 +1,13 @@
 import { Descriptions } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Button, Drawer, Field, Notice } from '../UI'
 import ProfileEditor from './ProfileEditor'
 import AccountProfile from './AccountProfile'
+import AccountHealth from './AccountHealth'
+import { checkedAt } from '../../utils/checkTime'
 import { ReportAccountAction } from './ReportModal'
 import GroupSelect from '../common/GroupSelect'
-import type { Account, Task } from '../../types'
+import type { Account, CheckKind, Task } from '../../types'
 interface Props {
   account?: Account
   tasks: Task[]
@@ -13,7 +15,7 @@ interface Props {
   onBusy: (busy: boolean) => void
   busy: boolean
   onClose: () => void
-  onCheck: (account: Account) => void
+  onCheck: (account: Account, kind?: CheckKind) => void
   onDelete: (account: Account) => void
   onGroupChange: (account: Account, group: string) => void
 }
@@ -41,6 +43,12 @@ export default function AccountDetailsDrawer({
       {account && (
         <>
           <AccountProfile account={account} />
+          <div className="detail-health-grid">
+            <div><span className="muted-text">Сессия Telegram</span><AccountHealth account={account} kind="session" /></div>
+            <div><span className="muted-text">Спамблок</span><AccountHealth account={account} kind="spam" /></div>
+          </div>
+          {account.spamDetail && <details className="spambot-reply"><summary>Ответ @SpamBot</summary><p>{account.spamDetail}</p></details>}
+          {account.checkRetryAt && <Notice className="mb-4" type="warning" title={`Следующая проверка после ${checkedAt(account.checkRetryAt)}`} />}
           {account.error && <Notice className="mb-4" type="warning" title={account.error} />}
           <Descriptions
             column={1}
@@ -96,10 +104,11 @@ export default function AccountDetailsDrawer({
               block
               icon={<ReloadOutlined aria-hidden="true" />}
               disabled={busy || account.status === 'working'}
-              onClick={() => onCheck(account)}
+              onClick={() => onCheck(account, 'session')}
             >
-              Проверить аккаунт
+              Проверить сессию
             </Button>
+            <Button block icon={<SafetyCertificateOutlined aria-hidden="true" />} disabled={busy || account.status === 'working'} onClick={() => onCheck(account, 'spam')}>Проверить спамблок</Button>
 
             <Button
               block
