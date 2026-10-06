@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableColumnsType } from 'antd'
-import { ExportOutlined, FlagOutlined, SendOutlined, MessageOutlined, LikeOutlined } from '@ant-design/icons'
+import { ExportOutlined, FlagOutlined, SendOutlined, MessageOutlined, LikeOutlined, UserAddOutlined } from '@ant-design/icons'
 import {
   Badge,
   Button,
@@ -136,6 +136,9 @@ export default function AccountTable({
         separateCount
         action={
           <div className="account-heading-actions">
+            <Button icon={<UserAddOutlined aria-hidden="true" />} disabled={busy || !accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationMode('subscriptions')}>
+              Подписаться
+            </Button>
             <Button icon={<LikeOutlined aria-hidden="true" />} disabled={busy || !accounts.some((account) => account.status === 'ready')} onClick={() => setPublicationMode('reactions')}>
               Реакции
             </Button>

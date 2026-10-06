@@ -71,6 +71,18 @@ test('manual stop finishes the current operation and does not send the next one'
   assert.deepEqual(opts.calls, ['a1'])
 })
 
+test('pending join approval completes an action and keeps the account available for other channels', async () => {
+  const opts = options()
+  opts.send = async (delivery) => {
+    opts.calls.push(delivery.id)
+    return delivery.id === 'a1' ? { delivery: { ...delivery, state: 'requested' }, stop: false } : sent(delivery)
+  }
+  assert.equal(await runPublicationQueue(deliveries, opts), false)
+  assert.deepEqual(opts.calls, ['a1', 'b1', 'a2', 'b2'])
+  assert.deepEqual(opts.skipped, [])
+  assert.equal(opts.results[0].state, 'requested')
+})
+
 test('changed destination or expired panel authorization stops the queue', async () => {
   const opts = options()
   opts.send = async (delivery) => { opts.calls.push(delivery.id); return { delivery: { ...delivery, state: 'failed', error: 'Changed destination' }, stop: true } }

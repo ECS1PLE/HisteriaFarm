@@ -54,6 +54,12 @@ def error_message(exc):
         "MessageIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
         "MsgIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
         "ChannelPrivateError": "Этот чат недоступен аккаунту. Проверь его участие и права доступа.",
+        "ChannelsTooMuchError": "Аккаунт достиг лимита подписок на каналы и группы.",
+        "UserChannelsTooMuchError": "Аккаунт достиг лимита подписок на каналы и группы.",
+        "InviteHashExpiredError": "Пригласительная ссылка истекла или была отозвана.",
+        "InviteHashInvalidError": "Telegram не принял пригласительную ссылку.",
+        "UserBannedInChannelError": "Аккаунт заблокирован в этом канале.",
+        "StarsPaymentRequiredError": "Для подписки требуется оплата. Платные подписки не поддерживаются.",
     }
     if isinstance(exc, (TimeoutError, OSError)):
         return "Не удалось подключиться к Telegram. Проверь сеть и повтори."
@@ -62,6 +68,8 @@ def error_message(exc):
         return messages[name]
     if isinstance(exc, errors.RPCError):
         code = getattr(exc, "message", "") or ""
+        if code == "STARS_PAYMENT_REQUIRED":
+            return "Для подписки требуется оплата. Платные подписки не поддерживаются."
         diagnostic = code if re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) else name
         return f"Telegram отклонил операцию ({diagnostic})."
     return "Не удалось выполнить операцию Telegram. Повтори позже."

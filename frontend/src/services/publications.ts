@@ -1,13 +1,13 @@
 import { api } from './api'
 
-export type PublicationMode = 'messages' | 'comments' | 'direct' | 'reactions'
+export type PublicationMode = 'messages' | 'comments' | 'direct' | 'reactions' | 'subscriptions'
 
 export interface PublicationDelivery {
   id: string
   accountId: string
   name: string
   targetIndex: number
-  state: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped'
+  state: 'pending' | 'sending' | 'sent' | 'requested' | 'failed' | 'unknown' | 'skipped'
   messageId: number | null
   error: string
 }
@@ -26,7 +26,7 @@ export interface Publication {
   expiresAt: string
   cancelled: boolean
   error: string
-  targets: { link: string; title: string; discussionTitle: string | null; messagePreview?: string | null }[]
+  targets: { link: string; title: string; discussionTitle: string | null; messagePreview?: string | null; requestNeeded?: boolean }[]
   deliveries: PublicationDelivery[]
 }
 
