@@ -10,6 +10,7 @@ from django.utils import timezone
 from telethon import errors, functions
 
 from . import telegram
+from .access import available_accounts, can_use
 from .models import Account, WarmupJob, WarmupParticipant
 from .security import decrypt, session_lock
 
@@ -52,9 +53,9 @@ def start(owner, data):
     with session_lock(f"warmup-owner-{owner.pk}"), transaction.atomic():
         if WarmupJob.objects.filter(owner=owner, status="running").exists():
             raise ValidationError("Прогрев уже запущен. Сначала останови текущую задачу.")
-        accounts = list(Account.objects.filter(owner=owner, pk__in=ids))
+        accounts = list(available_accounts(owner).filter(pk__in=ids))
         if len(accounts) != len(ids):
-            raise ValidationError("Можно выбрать только свои подключённые аккаунты.")
+            raise ValidationError("Выбери аккаунты, доступные на твоём тарифе.")
         if any(account.status != "ready" for account in accounts):
             raise ValidationError("Все выбранные аккаунты должны быть готовы к работе.")
         now = timezone.now()
@@ -119,6 +120,10 @@ def tick():
                     finish(job, "completed", "Прошло 24 часа.")
                     continue
                 participants = list(job.participants.select_related("account").order_by("id"))
+                allowed = set(available_accounts(job.owner).filter(pk__in=[p.account_id for p in participants]).values_list("pk", flat=True))
+                if any(p.account_id not in allowed for p in participants):
+                    finish(job, "failed", "Доступ к аккаунтам изменился. Проверь тариф и запусти прогрев заново.")
+                    continue
                 if len(participants) < 2:
                     finish(job, "failed", "Для обмена сообщениями осталось меньше двух аккаунтов.")
                     continue
@@ -130,6 +135,9 @@ def tick():
                     if participant.next_message_at > now:
                         continue
                     recipient = random.choice([p.account for p in participants if p.account_id != participant.account_id])
+                    if not can_use(job.owner, participant.account) or not can_use(job.owner, recipient):
+                        finish(job, "failed", "Доступ к аккаунтам изменился. Проверь тариф.")
+                        break
                     participant.next_message_at = next_message_time(now)
                     participant.save(update_fields=["next_message_at"])
                     try:

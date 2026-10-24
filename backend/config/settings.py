@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
-VAR_DIR = BASE_DIR / "var"
-VAR_DIR.mkdir(mode=0o700, exist_ok=True)
+VAR_DIR = Path(os.getenv("DJANGO_VAR_DIR", str(BASE_DIR / "var"))).expanduser().resolve()
+VAR_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 def persistent_secret(name, factory):
     value = os.environ.get(name)
     if value:
@@ -24,7 +24,7 @@ SESSION_ENCRYPTION_KEY = persistent_secret("SESSION_ENCRYPTION_KEY", lambda: Fer
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
 INSTALLED_APPS = ["django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "accounts"]
-MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware"]
+MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware"]
 ROOT_URLCONF = "config.urls"
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": VAR_DIR / "db.sqlite3", "OPTIONS": {"timeout": 30}}}
 AUTH_PASSWORD_VALIDATORS = [
@@ -43,6 +43,15 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", str(SESSION_COOKIE_SECURE)).lower() == "true"
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if SESSION_COOKIE_SECURE else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SESSION_COOKIE_SECURE
+SECURE_HSTS_PRELOAD = SESSION_COOKIE_SECURE
+if os.getenv("TRUST_PROXY_HTTPS", "false").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+TRUST_PROXY_CLIENT_IP = os.getenv("TRUST_PROXY_CLIENT_IP", "false").lower() == "true"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 SESSION_COOKIE_AGE = 86400
 DATA_UPLOAD_MAX_MEMORY_SIZE = 7 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024

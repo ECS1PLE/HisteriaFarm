@@ -112,18 +112,17 @@ class PublicationTests(TestCase):
             self.assertTrue(client.disconnected)
         self.assertEqual(Activity.objects.filter(title="Сообщение отправлено").count(), 2)
 
-    def test_non_owner_chat_and_personal_conversation_are_rejected(self):
-        for source in (channel(creator=False), types.User(id=444, first_name="Личный аккаунт")):
-            self.owner_client.source = source
-            with patch("accounts.telegram.client_for", side_effect=self.factory):
-                response = self.post("/api/publications/", self.data)
-            self.assertEqual(response.status_code, 403)
+    def test_personal_conversation_requires_direct_mode(self):
+        self.owner_client.source = types.User(id=444, first_name="Личный аккаунт")
+        with patch("accounts.telegram.client_for", side_effect=self.factory):
+            response = self.post("/api/publications/", self.data)
+        self.assertEqual(response.status_code, 403)
         self.assertFalse(PublicationBatch.objects.exists())
         self.assertEqual(self.owner_client.sent, [])
 
     def test_foreign_accounts_and_duplicate_ids_are_rejected_before_connecting(self):
         stranger = Account.objects.create(owner=self.other, telegram_id=333, first_name="Чужой", phone="+79993333333", session=self.sender.session)
-        for change in ({"accountIds": [str(stranger.pk)]}, {"verifierId": str(stranger.pk)}, {"accountIds": [str(self.sender.pk)] * 2}):
+        for change in ({"accountIds": [str(stranger.pk)]}, {"accountIds": [str(self.sender.pk)] * 2}):
             with patch("accounts.telegram.client_for") as factory:
                 self.assertEqual(self.post("/api/publications/", {**self.data, **change}).status_code, 400)
                 factory.assert_not_called()
@@ -149,26 +148,32 @@ class PublicationTests(TestCase):
         self.assertIsInstance(self.sender_client.requests[-1], functions.messages.GetDiscussionMessageRequest)
         self.assertEqual(self.sender_client.requests[-1].msg_id, 123)
 
-    def test_foreign_or_missing_discussion_group_is_rejected(self):
+    def test_non_owned_discussion_is_allowed_and_missing_discussion_is_rejected(self):
         self.owner_client.source = channel(broadcast=True)
         self.owner_client.group = channel(202, creator=False)
         data = {**self.data, "mode": "comments", "targets": ["https://t.me/my_channel/123"]}
         with patch("accounts.telegram.client_for", side_effect=self.factory):
-            self.assertEqual(self.post("/api/publications/", data).status_code, 403)
+            self.assertEqual(self.post("/api/publications/", data).status_code, 201)
             self.owner_client.empty_discussion = True
             self.assertEqual(self.post("/api/publications/", data).status_code, 400)
-        self.assertFalse(PublicationBatch.objects.exists())
+        self.assertEqual(PublicationBatch.objects.count(), 1)
 
-    def test_owner_or_destination_change_stops_before_send(self):
-        for change in ("owner", "target"):
-            batch = self.prepare()
-            self.owner_client.source = channel(creator=False) if change == "owner" else channel(999)
-            response = self.send(batch, batch["deliveries"][0]).json()
-            self.assertTrue(response["stop"])
-            self.assertEqual(response["delivery"]["state"], "failed")
-            self.owner_client.source = channel()
+    def test_destination_change_stops_before_send(self):
+        batch = self.prepare()
+        self.owner_client.source = channel(999)
+        row = next(row for row in batch["deliveries"] if row["accountId"] == str(self.verifier.pk))
+        response = self.send(batch, row).json()
+        self.assertTrue(response["stop"])
+        self.assertEqual(response["delivery"]["state"], "failed")
         self.assertEqual(self.owner_client.sent, [])
         self.assertEqual(self.sender_client.sent, [])
+
+    def test_non_owned_group_remains_available_after_preview(self):
+        self.owner_client.source = channel(creator=False)
+        batch = self.prepare()
+        response = self.send(batch, batch["deliveries"][0]).json()
+        self.assertFalse(response["stop"])
+        self.assertEqual(response["delivery"]["state"], "sent")
 
     def test_sender_cannot_redirect_to_a_different_chat(self):
         batch = self.prepare()

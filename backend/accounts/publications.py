@@ -9,6 +9,7 @@ from django.utils import timezone
 from telethon import errors, functions, types, utils
 
 from . import telegram
+from .access import available_accounts
 from .models import Account, PublicationBatch, PublicationDelivery
 from .security import decrypt, encrypt, session_lock
 
@@ -312,10 +313,10 @@ def prepare(owner, data):
 
     account_map = {
         account.pk: account
-        for account in Account.objects.filter(owner=owner, pk__in=ids, status="ready")
+        for account in available_accounts(owner).filter(pk__in=ids, status="ready")
     }
     if len(account_map) != len(ids):
-        raise ValidationError("Используй только свои готовые аккаунты.")
+        raise ValidationError("Выбери готовые аккаунты, доступные на твоём тарифе.")
     accounts = [account_map[account_id] for account_id in ids]
 
     if not isinstance(links, list) or not 1 <= len(links) <= 10:
@@ -404,7 +405,7 @@ def skip_delivery_account(owner, batch_id, delivery_id, data):
     # then preserve a confirmed result or mark an interrupted attempt unknown.
     with session_lock(f"publication-{batch_id}", blocking=True):
         batch = PublicationBatch.objects.filter(pk=batch_id, owner=owner).first()
-        row = PublicationDelivery.objects.filter(pk=delivery_id, batch=batch, account__owner=owner).select_related("account").first() if batch else None
+        row = PublicationDelivery.objects.filter(pk=delivery_id, batch=batch, account__in=available_accounts(owner)).select_related("account").first() if batch else None
         if not row:
             raise telegram.TelegramFailure("Публикация не найдена.", 404)
         if row.state in ("pending", "sending"):
@@ -423,7 +424,7 @@ def deliver(owner, batch_id, delivery_id, data):
     with session_lock(f"publication-{batch_id}"):
         batch = PublicationBatch.objects.filter(pk=batch_id, owner=owner).first()
         row = PublicationDelivery.objects.filter(
-            pk=delivery_id, batch=batch, account__owner=owner,
+            pk=delivery_id, batch=batch, account__in=available_accounts(owner),
         ).select_related("account").first() if batch else None
         if not row:
             raise telegram.TelegramFailure("Публикация не найдена.", 404)
