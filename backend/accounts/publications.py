@@ -9,14 +9,18 @@ from django.utils import timezone
 from telethon import errors, functions, types, utils
 
 from . import telegram
+from .access import available_accounts
 from .models import Account, PublicationBatch, PublicationDelivery
 from .security import decrypt, encrypt, session_lock
 
+REACTIONS = ("👍", "👎", "❤️", "🔥", "👏", "🎉", "🤩", "😁", "🤔", "😢", "😱", "💯")
+
 
 class PublicationStop(telegram.TelegramFailure):
-    def __init__(self, message, status=400, unknown=False):
+    def __init__(self, message, status=400, unknown=False, *, stop_batch=False):
         super().__init__(message, status)
         self.unknown = unknown
+        self.stop_batch = stop_batch
 
 
 def parse_target(raw, mode):
@@ -26,6 +30,12 @@ def parse_target(raw, mode):
     raw = raw.strip()
     locator, post_id = None, None
 
+    if mode == "direct" and re.fullmatch(r"\+[\d ()-]+", raw):
+        phone = re.sub(r"\D", "", raw)
+        if not re.fullmatch(r"[1-9]\d{6,14}", phone):
+            raise ValidationError("Укажи номер с кодом страны, например +79991234567.")
+        return {"link": raw, "locator": {"phone": phone}, "postId": None}
+
     if re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{0,31}", raw):
         locator = {"username": raw.removeprefix("@").lower()}
     else:
@@ -34,40 +44,53 @@ def parse_target(raw, mode):
             url.scheme not in ("http", "https")
             or url.netloc.lower() not in ("t.me", "telegram.me")
             or url.fragment
-            or url.query not in ("", "single")
+            or url.query not in (("",) if mode == "direct" else ("", "single"))
         ):
             raise ValidationError("Нужна прямая ссылка t.me без параметров комментария или пересылки.")
 
         path = url.path.strip("/")
         invite = re.fullmatch(r"(?:\+|joinchat/)([A-Za-z0-9_-]+)", path)
-        private = re.fullmatch(r"c/([1-9]\d*)(?:/([1-9]\d*))?", path)
-        public = re.fullmatch(r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?", path)
+        private = re.fullmatch(r"c/([1-9]\d*)(?:/([1-9]\d*))?(?:/([1-9]\d*))?" if mode == "reactions" else r"c/([1-9]\d*)(?:/([1-9]\d*))?", path)
+        public = re.fullmatch(r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?(?:/([1-9]\d*))?" if mode == "reactions" else r"(?:s/)?([A-Za-z][A-Za-z0-9_]{0,31})(?:/([1-9]\d*))?", path)
 
-        if invite and mode == "messages":
+        if invite and mode in ("messages", "subscriptions"):
             locator = {"invite": invite[1]}
         elif private:
-            locator, post_id = {"channelId": int(private[1])}, private[2]
+            locator, post_id = {"channelId": int(private[1])}, (private[3] or private[2]) if mode == "reactions" else private[2]
         elif public and public[1].lower() not in (
             "share", "proxy", "socks", "login", "boost", "addstickers", "joinchat",
         ):
-            locator, post_id = {"username": public[1].lower()}, public[2]
+            locator, post_id = {"username": public[1].lower()}, (public[3] or public[2]) if mode == "reactions" else public[2]
         else:
             raise ValidationError("Ссылка не указывает на чат или пост Telegram.")
 
-    if mode == "comments":
+        if mode == "direct" and ("channelId" in locator or path.startswith("s/") or post_id):
+            raise ValidationError("Для личного сообщения укажи @username, прямую ссылку на пользователя или номер телефона.")
+
+    if mode in ("comments", "reactions"):
         if not post_id or int(post_id) > 2147483647:
-            raise ValidationError("Для комментария нужна ссылка на конкретный пост канала.")
+            raise ValidationError("Для реакции нужна ссылка на конкретный пост или сообщение." if mode == "reactions" else "Для комментария нужна ссылка на конкретный пост канала.")
         post_id = int(post_id)
     elif post_id:
+        if mode == "subscriptions":
+            raise ValidationError("Для подписки укажи ссылку на канал, а не на отдельный пост.")
         raise ValidationError("Для сообщения укажи ссылку на сам чат; для поста выбери «Комментарии».")
+
+    if mode == "subscriptions" and "channelId" in locator:
+        raise ValidationError("Для приватного канала нужна пригласительная ссылка t.me/+… или t.me/joinchat/….")
 
     return {"link": raw, "locator": locator, "postId": post_id}
 
 
 async def resolve(client, target, mode):
+    if mode == "subscriptions":
+        return await resolve_subscription(client, target)
     locator = target["locator"]
     try:
-        if "invite" in locator:
+        if "phone" in locator and mode == "direct":
+            resolved = await client(functions.contacts.ResolvePhoneRequest(phone=locator["phone"]))
+            entity = next((user for user in resolved.users if isinstance(resolved.peer, types.PeerUser) and user.id == resolved.peer.user_id), None)
+        elif "invite" in locator:
             invite = await client(functions.messages.CheckChatInviteRequest(hash=locator["invite"]))
             if not isinstance(invite, types.ChatInviteAlready):
                 raise telegram.TelegramFailure("Аккаунт не состоит в чате по этой ссылке. Добавь его в Telegram самостоятельно.")
@@ -78,12 +101,32 @@ async def resolve(client, target, mode):
         else:
             entity = await client.get_entity("@" + locator["username"])
     except ValueError:
-        raise telegram.TelegramFailure("Чат недоступен аккаунту. Проверь ссылку и его участие в чате.") from None
+        raise telegram.TelegramFailure("Получатель недоступен аккаунту. Проверь username или настройки поиска по номеру." if mode == "direct" else "Чат недоступен аккаунту. Проверь ссылку и его участие в чате.") from None
+
+    if mode == "direct":
+        if not isinstance(entity, types.User) or entity.bot or entity.deleted:
+            raise telegram.TelegramFailure("Для личного сообщения нужен действующий аккаунт пользователя, а не бот, чат или канал.")
+        return entity, None, {
+            "sourceId": utils.get_peer_id(entity),
+            "destinationId": utils.get_peer_id(entity),
+            "replyId": None,
+            "title": " ".join(part for part in (entity.first_name, entity.last_name) if part) or ("@" + entity.username if entity.username else "Пользователь Telegram"),
+            "discussionTitle": None,
+        }
 
     if not isinstance(entity, (types.Channel, types.Chat)):
-        raise PublicationStop("Разрешены только чаты и каналы; личные переписки не поддерживаются.", 403)
+        raise PublicationStop("Для чатов и каналов выбери соответствующий режим; для личной переписки — «Личные сообщения».", 403)
 
     destination, reply_id = entity, None
+    if mode == "reactions":
+        message = await client.get_messages(entity, ids=target["postId"])
+        if not isinstance(message, types.Message) or message.id != target["postId"] or utils.get_peer_id(message.peer_id) != utils.get_peer_id(entity):
+            raise telegram.TelegramFailure("Сообщение удалено или недоступно этому аккаунту.")
+        return entity, target["postId"], {
+            "sourceId": utils.get_peer_id(entity), "destinationId": utils.get_peer_id(entity),
+            "replyId": target["postId"], "title": entity.title,
+            "discussionTitle": None, "messagePreview": (message.message or "Медиа без подписи")[:500],
+        }
     if mode == "comments":
         if not isinstance(entity, types.Channel) or not entity.broadcast:
             raise PublicationStop("Комментарии поддерживаются только под постами канала.")
@@ -122,6 +165,96 @@ async def resolve(client, target, mode):
     }
 
 
+async def resolve_subscription(client, target):
+    """Preview an invite without joining; its hash is bound to the channel."""
+    locator = target["locator"]
+    already, entity, invite = False, None, None
+    if "invite" in locator:
+        invite = await client(functions.messages.CheckChatInviteRequest(hash=locator["invite"]))
+        if isinstance(invite, (types.ChatInviteAlready, types.ChatInvitePeek)):
+            entity = invite.chat
+            already = isinstance(invite, types.ChatInviteAlready)
+        elif isinstance(invite, types.ChatInvite):
+            if invite.subscription_pricing is not None:
+                raise telegram.TelegramFailure("Платные подписки не поддерживаются.")
+            if not invite.channel or not invite.broadcast or invite.megagroup:
+                raise telegram.TelegramFailure("Для подписки нужна ссылка на канал.")
+        else:
+            raise telegram.TelegramFailure("Telegram не подтвердил пригласительную ссылку.")
+    else:
+        try:
+            entity = await client.get_entity("@" + locator["username"])
+        except ValueError:
+            raise telegram.TelegramFailure("Канал не найден. Проверь ссылку или username.") from None
+    if entity is not None and (not isinstance(entity, types.Channel) or not entity.broadcast or entity.megagroup):
+        raise telegram.TelegramFailure("Для подписки нужна ссылка на канал.")
+    peer_id = utils.get_peer_id(entity) if entity is not None else None
+    return entity, None, {
+        "sourceId": peer_id, "destinationId": peer_id, "replyId": None,
+        "title": entity.title if entity is not None else invite.title,
+        "discussionTitle": None, "alreadyMember": already,
+        "requestNeeded": bool(getattr(invite, "request_needed", False) or getattr(entity, "join_request", False)),
+    }
+
+
+async def join_subscription(client, target, entity, resolved):
+    if resolved["alreadyMember"]:
+        return "sent", "Уже подписан."
+    if "invite" in target["locator"]:
+        request = functions.messages.ImportChatInviteRequest(hash=target["locator"]["invite"])
+    else:
+        try:
+            await client(functions.channels.GetParticipantRequest(channel=entity, participant=types.InputPeerSelf()))
+        except errors.UserNotParticipantError:
+            pass
+        else:
+            return "sent", "Уже подписан."
+        request = functions.channels.JoinChannelRequest(channel=entity)
+    try:
+        result = await client(request)
+    except errors.InviteRequestSentError:
+        return "requested", "Ожидает одобрения администратора."
+    except errors.UserAlreadyParticipantError:
+        return "sent", "Уже подписан."
+    if not isinstance(result, (types.Updates, types.UpdatesCombined, types.UpdateShort, types.UpdatesTooLong)):
+        raise PublicationStop("Telegram не подтвердил подписку. Автоматического повтора нет.", unknown=True)
+    return "sent", ""
+
+
+async def reaction_settings(client, destination, emoji):
+    request = functions.channels.GetFullChannelRequest(destination) if isinstance(destination, types.Channel) else functions.messages.GetFullChatRequest(destination.id)
+    full = (await client(request)).full_chat
+    allowed = getattr(full, "available_reactions", None)
+    if isinstance(allowed, types.ChatReactionsNone):
+        raise telegram.TelegramFailure("В этом чате реакции отключены.")
+    if isinstance(allowed, types.ChatReactionsSome) and not any(isinstance(reaction, types.ReactionEmoji) and reaction.emoticon.replace("\ufe0f", "") == emoji.replace("\ufe0f", "") for reaction in allowed.reactions):
+        raise telegram.TelegramFailure("Эта реакция не разрешена в чате. Выбери другую.")
+    return full
+
+
+async def put_reaction(client, account, destination, message_id, emoji):
+    full = await reaction_settings(client, destination, emoji)
+    previous = getattr(full, "default_send_as", None)
+    restore = None
+    if previous and not (isinstance(previous, types.PeerUser) and previous.user_id == account.telegram_id):
+        restore = await client.get_input_entity(previous)
+        await client(functions.messages.SaveDefaultSendAsRequest(peer=destination, send_as=types.InputPeerSelf()))
+    try:
+        try:
+            result = await client(functions.messages.SendReactionRequest(
+                peer=destination, msg_id=message_id, reaction=[types.ReactionEmoji(emoticon=emoji)], big=False, add_to_recent=False,
+            ))
+        except errors.MessageNotModifiedError:
+            # Telegram confirms the requested reaction was already set.
+            return message_id
+        if not isinstance(result, (types.Updates, types.UpdatesCombined, types.UpdateShort, types.UpdatesTooLong)):
+            raise PublicationStop("Telegram не подтвердил реакцию. Автоматического повтора нет.", unknown=True)
+        return message_id
+    finally:
+        if restore is not None:
+            await client(functions.messages.SaveDefaultSendAsRequest(peer=destination, send_as=restore))
+
+
 def serialize_delivery(delivery):
     return {
         "id": str(delivery.pk),
@@ -140,11 +273,12 @@ def serialize(batch):
         "id": str(batch.pk),
         "mode": payload["mode"],
         "text": payload["text"],
+        "reaction": payload.get("reaction"),
         "expiresAt": batch.expires.isoformat(),
         "cancelled": batch.cancelled,
         "error": batch.error,
         "targets": [
-            {"link": target["link"], "title": target["title"], "discussionTitle": target["discussionTitle"]}
+            {"link": target["link"], "title": target["title"], "discussionTitle": target["discussionTitle"], "messagePreview": target.get("messagePreview"), "requestNeeded": target.get("requestNeeded", False)}
             for target in payload["targets"]
         ],
         "deliveries": [
@@ -156,9 +290,16 @@ def serialize(batch):
 
 def prepare(owner, data):
     mode, text, links, ids = data.get("mode"), data.get("text"), data.get("targets"), data.get("accountIds")
-    if mode not in ("messages", "comments"):
-        raise ValidationError("Выбери сообщения или комментарии.")
-    if not isinstance(text, str) or not text.strip() or len(text.encode("utf-16-le")) // 2 > 4096:
+    if mode not in ("messages", "comments", "direct", "reactions", "subscriptions"):
+        raise ValidationError("Выбери сообщения, комментарии, реакции или подписки.")
+    reaction = data.get("reaction")
+    if mode == "reactions":
+        if reaction not in REACTIONS:
+            raise ValidationError("Выбери доступную реакцию из списка.")
+        text = ""
+    elif mode == "subscriptions":
+        text = ""
+    elif not isinstance(text, str) or not text.strip() or len(text.encode("utf-16-le")) // 2 > 4096:
         raise ValidationError("Укажи текст до 4096 символов Telegram.")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 100:
         raise ValidationError("Выбери от 1 до 100 своих готовых аккаунтов.")
@@ -172,10 +313,10 @@ def prepare(owner, data):
 
     account_map = {
         account.pk: account
-        for account in Account.objects.filter(owner=owner, pk__in=ids, status="ready")
+        for account in available_accounts(owner).filter(pk__in=ids, status="ready")
     }
     if len(account_map) != len(ids):
-        raise ValidationError("Используй только свои готовые аккаунты.")
+        raise ValidationError("Выбери готовые аккаунты, доступные на твоём тарифе.")
     accounts = [account_map[account_id] for account_id in ids]
 
     if not isinstance(links, list) or not 1 <= len(links) <= 10:
@@ -185,18 +326,34 @@ def prepare(owner, data):
 
     with session_lock(sender.pk):
         async def verify():
+            nonlocal reaction
             client = telegram.client_for(decrypt(sender.session))
             try:
                 await client.connect()
                 if not await client.is_user_authorized():
                     raise telegram.TelegramFailure("Сессия первого отправителя отозвана.", 409)
+                if mode in ("direct", "reactions", "subscriptions"):
+                    me = await client.get_me()
+                    if not me or me.id != sender.telegram_id or me.deleted:
+                        raise telegram.TelegramFailure("Сессия первого отправителя не принадлежит выбранному аккаунту. Проверь её в панели.", 409)
+
+                if mode == "reactions":
+                    catalog = await client(functions.messages.GetAvailableReactionsRequest(hash=0))
+                    definition = next((item for item in getattr(catalog, "reactions", []) if not item.inactive and item.reaction.replace("\ufe0f", "") == reaction.replace("\ufe0f", "")), None)
+                    if not definition:
+                        raise telegram.TelegramFailure("Telegram не подтвердил доступность этой реакции. Выбери другую.")
+                    reaction = definition.reaction
 
                 seen = set()
                 for target in targets:
-                    _, _, resolved = await resolve(client, target, mode)
+                    destination, _, resolved = await resolve(client, target, mode)
+                    if mode == "reactions":
+                        await reaction_settings(client, destination, reaction)
                     key = (resolved["destinationId"], resolved["replyId"])
+                    if mode == "subscriptions" and key[0] is None:
+                        key = ("invite", target["locator"]["invite"])
                     if key in seen:
-                        raise ValidationError("Один чат или пост указан несколько раз.")
+                        raise ValidationError("Один получатель указан несколько раз." if mode == "direct" else "Один чат или пост указан несколько раз.")
                     seen.add(key)
                     target.update(resolved)
             finally:
@@ -207,7 +364,7 @@ def prepare(owner, data):
     with transaction.atomic():
         batch = PublicationBatch.objects.create(
             owner=owner,
-            payload=encrypt({"mode": mode, "text": text, "targets": targets}),
+            payload=encrypt({"mode": mode, "text": text, "reaction": reaction if mode == "reactions" else None, "targets": targets}),
             expires=timezone.now() + timedelta(hours=1),
         )
         PublicationDelivery.objects.bulk_create([
@@ -227,6 +384,39 @@ def cancel(owner, batch_id):
         return batch
 
 
+def skip_sender(batch, row):
+    """Never retry another target using a sender that failed in this batch."""
+    batch.deliveries.filter(account_id=row.account_id, state="pending").exclude(pk=row.pk).update(
+        state="skipped", error=("Аккаунт пропущен: " + (row.error or "Ответ на предыдущий запрос не получен."))[:255],
+    )
+
+
+def delivery_result(batch, row, *, skipped=False):
+    return {
+        "delivery": serialize_delivery(row), "stop": batch.cancelled,
+        "skippedAccountId": str(row.account_id) if skipped else None,
+    }
+
+
+def skip_delivery_account(owner, batch_id, delivery_id, data):
+    if data.get("confirmed") is not True:
+        raise ValidationError("Подтверди отправку перед пропуском аккаунта.")
+    # A lost HTTP response can leave an operation running. Wait for its lock,
+    # then preserve a confirmed result or mark an interrupted attempt unknown.
+    with session_lock(f"publication-{batch_id}", blocking=True):
+        batch = PublicationBatch.objects.filter(pk=batch_id, owner=owner).first()
+        row = PublicationDelivery.objects.filter(pk=delivery_id, batch=batch, account__in=available_accounts(owner)).select_related("account").first() if batch else None
+        if not row:
+            raise telegram.TelegramFailure("Публикация не найдена.", 404)
+        if row.state in ("pending", "sending"):
+            row.error = "Ответ сервера не получен. Аккаунт пропущен; повторной отправки не будет."
+            row.state = "unknown" if row.state == "sending" else "skipped"
+            row.save(update_fields=["state", "error"])
+            telegram.record(owner, "Аккаунт пропущен", f"{row.account.first_name}: {row.error}", "warning")
+        skip_sender(batch, row)
+        return delivery_result(batch, row, skipped=True)
+
+
 def deliver(owner, batch_id, delivery_id, data):
     if data.get("confirmed") is not True:
         raise ValidationError("Подтверди текст, адресатов и аккаунты перед отправкой.")
@@ -234,7 +424,7 @@ def deliver(owner, batch_id, delivery_id, data):
     with session_lock(f"publication-{batch_id}"):
         batch = PublicationBatch.objects.filter(pk=batch_id, owner=owner).first()
         row = PublicationDelivery.objects.filter(
-            pk=delivery_id, batch=batch, account__owner=owner,
+            pk=delivery_id, batch=batch, account__in=available_accounts(owner),
         ).select_related("account").first() if batch else None
         if not row:
             raise telegram.TelegramFailure("Публикация не найдена.", 404)
@@ -243,10 +433,10 @@ def deliver(owner, batch_id, delivery_id, data):
             if row.state == "sending":
                 row.state, row.error = "unknown", "Результат предыдущей отправки неизвестен; повтор запрещён."
                 row.save(update_fields=["state", "error"])
-                batch.cancelled, batch.error = True, row.error
-                batch.save(update_fields=["cancelled", "error"])
-                batch.deliveries.filter(state="pending").update(state="skipped")
-            return {"delivery": serialize_delivery(row), "stop": batch.cancelled}
+            skipped = row.state in ("failed", "unknown", "skipped")
+            if skipped:
+                skip_sender(batch, row)
+            return delivery_result(batch, row, skipped=skipped)
 
         if batch.cancelled or timezone.now() >= batch.expires:
             raise telegram.TelegramFailure("Отправка остановлена или срок формы истёк.", 409)
@@ -254,61 +444,78 @@ def deliver(owner, batch_id, delivery_id, data):
         payload = decrypt(batch.payload)
         target = payload["targets"][row.target_index]
 
-        with session_lock(row.account_id):
-            if row.account.status != "ready":
-                raise ValidationError("Аккаунт отправителя не готов. Проверь его в Telegram.")
-            row.state = "sending"
-            row.save(update_fields=["state"])
+        try:
+            with session_lock(row.account_id):
+                if row.account.status != "ready":
+                    raise telegram.TelegramFailure("Аккаунт отправителя не готов. Проверь его в Telegram.")
+                row.state = "sending"
+                row.save(update_fields=["state"])
 
-            async def operation():
-                client = telegram.client_for(decrypt(row.account.session))
-                try:
-                    await client.connect()
-                    if not await client.is_user_authorized():
-                        raise telegram.TelegramFailure("Сессия отправителя отозвана.", 409)
+                async def operation():
+                    client = telegram.client_for(decrypt(row.account.session))
+                    try:
+                        await client.connect()
+                        if not await client.is_user_authorized():
+                            raise telegram.TelegramFailure("Сессия отправителя отозвана.", 409)
+                        if payload["mode"] in ("direct", "reactions", "subscriptions"):
+                            me = await client.get_me()
+                            if not me or me.id != row.account.telegram_id or me.deleted:
+                                raise telegram.TelegramFailure("Сессия не принадлежит выбранному отправителю. Проверь её в панели.", 409)
 
-                    destination, reply_id, resolved = await resolve(client, target, payload["mode"])
-                    if any(resolved[key] != target[key] for key in ("sourceId", "destinationId", "replyId")):
-                        raise PublicationStop("Адресат или обсуждение изменились. Открой новую форму.", 409)
+                        destination, reply_id, resolved = await resolve(client, target, payload["mode"])
+                        if payload["mode"] == "subscriptions" and "invite" in target["locator"]:
+                            # ChatInvite hides the channel ID for non-members. Compare
+                            # IDs when both are available, otherwise its visible title.
+                            changed = resolved["sourceId"] != target["sourceId"] if resolved["sourceId"] is not None and target["sourceId"] is not None else resolved["title"] != target["title"]
+                        else:
+                            changed = any(resolved[key] != target[key] for key in ("sourceId", "destinationId", "replyId"))
+                        if changed:
+                            raise PublicationStop("Адресат или обсуждение изменились. Открой новую форму.", 409, stop_batch=True)
 
-                    sent = await client.send_message(
-                        destination, payload["text"], parse_mode=None,
-                        link_preview=False, reply_to=reply_id, send_as=types.InputPeerSelf(),
-                    )
-                    if not sent or not isinstance(sent.id, int) or sent.id <= 0:
-                        raise PublicationStop("Telegram не подтвердил отправку. Автоматического повтора нет.", unknown=True)
-                    return sent.id
-                except (errors.FloodWaitError, errors.SlowModeWaitError) as exc:
-                    raise PublicationStop(telegram.error_message(exc), 429) from None
-                except (OSError, TimeoutError) as exc:
-                    raise PublicationStop(telegram.error_message(exc), 503, unknown=True) from None
-                finally:
-                    await client.disconnect()
+                        if payload["mode"] == "subscriptions":
+                            return await join_subscription(client, target, destination, resolved)
 
-            try:
-                row.message_id = telegram.run(operation())
-                row.state = "sent"
-                telegram.record(
-                    owner,
-                    "Комментарий отправлен" if payload["mode"] == "comments" else "Сообщение отправлено",
-                    f"{row.account.first_name} → {target['title']}", "success",
-                )
-            except telegram.TelegramFailure as exc:
-                uncertain = (
-                    isinstance(exc, PublicationStop) and exc.unknown
-                ) or isinstance(exc.__context__, (TimeoutError, OSError))
-                row.state = "unknown" if uncertain else "failed"
-                row.error = str(exc)[:255]
-                if isinstance(exc, PublicationStop) or uncertain:
-                    batch.cancelled, batch.error = True, row.error
-                    batch.save(update_fields=["cancelled", "error"])
-                    batch.deliveries.filter(state="pending").update(state="skipped")
-                telegram.record(owner, "Публикация не подтверждена", f"{row.account.first_name}: {row.error}", "warning")
-            except Exception:
-                row.state, row.error = "unknown", "Результат неизвестен. Повторная отправка запрещена."
+                        if payload["mode"] == "reactions":
+                            return await put_reaction(client, row.account, destination, target["postId"], payload["reaction"])
+
+                        options = {"parse_mode": None, "link_preview": False}
+                        if payload["mode"] != "direct":
+                            options.update(reply_to=reply_id, send_as=types.InputPeerSelf())
+                        sent = await client.send_message(destination, payload["text"], **options)
+                        if not sent or not isinstance(sent.id, int) or sent.id <= 0:
+                            raise PublicationStop("Telegram не подтвердил отправку. Автоматического повтора нет.", unknown=True)
+                        return sent.id
+                    except (errors.FloodWaitError, errors.SlowModeWaitError, errors.PeerFloodError) as exc:
+                        raise PublicationStop(telegram.error_message(exc), 429) from None
+                    except (OSError, TimeoutError) as exc:
+                        raise PublicationStop(telegram.error_message(exc), 503, unknown=True) from None
+                    finally:
+                        await client.disconnect()
+
+                result = telegram.run(operation())
+                if payload["mode"] == "subscriptions":
+                    row.state, row.error = result
+                else:
+                    row.message_id, row.state = result, "sent"
+        except ValidationError as exc:
+            row.state, row.error = "failed", " ".join(exc.messages)[:255]
+        except telegram.TelegramFailure as exc:
+            uncertain = (isinstance(exc, PublicationStop) and exc.unknown) or isinstance(exc.__context__, (TimeoutError, OSError))
+            row.state = "unknown" if uncertain else "failed"
+            row.error = str(exc)[:255]
+            if isinstance(exc, PublicationStop) and exc.stop_batch:
                 batch.cancelled, batch.error = True, row.error
                 batch.save(update_fields=["cancelled", "error"])
                 batch.deliveries.filter(state="pending").update(state="skipped")
+        except Exception:
+            row.state, row.error = "unknown", "Результат неизвестен. Повторная отправка запрещена."
 
-            row.save(update_fields=["state", "message_id", "error"])
-        return {"delivery": serialize_delivery(row), "stop": batch.cancelled}
+        row.save(update_fields=["state", "message_id", "error"])
+        skipped = row.state in ("failed", "unknown", "skipped")
+        if skipped:
+            skip_sender(batch, row)
+            telegram.record(owner, "Публикация не подтверждена", f"{row.account.first_name}: {row.error}", "warning")
+        else:
+            title = {"comments": "Комментарий отправлен", "messages": "Сообщение отправлено", "direct": "Личное сообщение отправлено", "reactions": "Реакция поставлена", "subscriptions": "Заявка на подписку отправлена" if row.state == "requested" else "Подписка подтверждена"}[payload["mode"]]
+            telegram.record(owner, title, f"{row.account.first_name} → {target['title']}" + (f" · {payload['reaction']} · сообщение {target['postId']}" if payload["mode"] == "reactions" else ""), "success")
+        return delivery_result(batch, row, skipped=skipped)

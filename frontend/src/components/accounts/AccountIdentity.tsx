@@ -28,7 +28,7 @@ export default function AccountIdentity({
           )}
         </strong>
         <small>
-          {account.username ? '@' + account.username : 'Без username'}
+          {account.username ? '@' + account.username : 'Без username'}{account.owned === false ? ' · Общий' : ' · Свой'}
         </small>
       </span>
     </button>

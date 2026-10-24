@@ -5,6 +5,16 @@ class TelegramSettings(models.Model):
     owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     credentials = models.TextField()
 
+class Membership(models.Model):
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    premium_until = models.DateTimeField(null=True, blank=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
+
+class AuthRateLimit(models.Model):
+    key = models.CharField(max_length=64, primary_key=True)
+    attempts = models.PositiveIntegerField(default=0)
+    expires = models.DateTimeField()
+
 class Account(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -22,6 +32,14 @@ class Account(models.Model):
     last_active = models.DateTimeField(auto_now=True)
     error = models.CharField(max_length=255, blank=True)
 
+    session_status = models.CharField(max_length=16, default="unchecked")
+    session_checked_at = models.DateTimeField(null=True, blank=True)
+    session_error = models.CharField(max_length=255, blank=True)
+    spam_status = models.CharField(max_length=16, default="unchecked")
+    spam_checked_at = models.DateTimeField(null=True, blank=True)
+    spam_detail = models.TextField(blank=True)
+    check_retry_at = models.DateTimeField(null=True, blank=True)
+
 class LoginAttempt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -38,6 +56,7 @@ class Activity(models.Model):
 class ReportDraft(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     payload = models.TextField()
     state = models.CharField(max_length=16, default="confirm")
     expires = models.DateTimeField()
@@ -79,9 +98,38 @@ class WarmupParticipant(models.Model):
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
     next_message_at = models.DateTimeField()
     sent = models.PositiveIntegerField(default=0)
+    failures = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=255, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["job", "account"], name="unique_warmup_participant")]
+
+class MonitorRule(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    mode = models.CharField(max_length=16, choices=[("channel", "Канал"), ("chat", "Чат")])
+    target = models.CharField(max_length=255)
+    target_id = models.BigIntegerField()
+    title = models.CharField(max_length=255)
+    keyword = models.CharField(max_length=200, blank=True)
+    text = models.TextField()
+    status = models.CharField(max_length=16, default="running", db_index=True)
+    cursor = models.BigIntegerField(default=0)
+    sent = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=255, blank=True)
+    next_poll_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class MonitorDelivery(models.Model):
+    rule = models.ForeignKey(MonitorRule, on_delete=models.CASCADE, related_name="deliveries")
+    message_id = models.BigIntegerField()
+    state = models.CharField(max_length=16, default="attempted")
+    error = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["rule", "message_id"], name="one_monitor_reply_per_message")]
 
 class User(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -10,6 +10,7 @@ from django.utils import timezone
 from telethon import errors, functions
 
 from . import telegram
+from .access import available_accounts, can_use
 from .models import Account, WarmupJob, WarmupParticipant
 from .security import decrypt, session_lock
 
@@ -26,10 +27,11 @@ def serialize(job):
     return {
         "id": str(job.pk), "status": job.status,
         "startedAt": job.started_at.isoformat(), "endsAt": job.ends_at.isoformat(),
-        "error": job.error, "sent": sum(p.sent for p in participants),
+        "error": job.error, "sent": sum(p.sent for p in participants), "failures": sum(p.failures for p in participants),
         "progress": min(100, max(0, round((now - job.started_at).total_seconds() / 86400 * 100))),
         "participants": [{"accountId": str(p.account_id), "name": p.account.first_name,
-            "sent": p.sent, "nextMessageAt": p.next_message_at.isoformat() if job.status == "running" and p.next_message_at < job.ends_at else None}
+            "sent": p.sent, "failures": p.failures, "error": p.error,
+            "nextMessageAt": p.next_message_at.isoformat() if job.status == "running" and p.next_message_at < job.ends_at else None}
             for p in participants],
     }
 
@@ -51,9 +53,9 @@ def start(owner, data):
     with session_lock(f"warmup-owner-{owner.pk}"), transaction.atomic():
         if WarmupJob.objects.filter(owner=owner, status="running").exists():
             raise ValidationError("Прогрев уже запущен. Сначала останови текущую задачу.")
-        accounts = list(Account.objects.filter(owner=owner, pk__in=ids))
+        accounts = list(available_accounts(owner).filter(pk__in=ids))
         if len(accounts) != len(ids):
-            raise ValidationError("Можно выбрать только свои подключённые аккаунты.")
+            raise ValidationError("Выбери аккаунты, доступные на твоём тарифе.")
         if any(account.status != "ready" for account in accounts):
             raise ValidationError("Все выбранные аккаунты должны быть готовы к работе.")
         now = timezone.now()
@@ -118,6 +120,10 @@ def tick():
                     finish(job, "completed", "Прошло 24 часа.")
                     continue
                 participants = list(job.participants.select_related("account").order_by("id"))
+                allowed = set(available_accounts(job.owner).filter(pk__in=[p.account_id for p in participants]).values_list("pk", flat=True))
+                if any(p.account_id not in allowed for p in participants):
+                    finish(job, "failed", "Доступ к аккаунтам изменился. Проверь тариф и запусти прогрев заново.")
+                    continue
                 if len(participants) < 2:
                     finish(job, "failed", "Для обмена сообщениями осталось меньше двух аккаунтов.")
                     continue
@@ -129,6 +135,9 @@ def tick():
                     if participant.next_message_at > now:
                         continue
                     recipient = random.choice([p.account for p in participants if p.account_id != participant.account_id])
+                    if not can_use(job.owner, participant.account) or not can_use(job.owner, recipient):
+                        finish(job, "failed", "Доступ к аккаунтам изменился. Проверь тариф.")
+                        break
                     participant.next_message_at = next_message_time(now)
                     participant.save(update_fields=["next_message_at"])
                     try:
@@ -138,16 +147,25 @@ def tick():
                         continue
                     except (telegram.TelegramFailure, errors.RPCError, OSError, TimeoutError, ValueError) as exc:
                         detail = str(exc) if isinstance(exc, telegram.TelegramFailure) else telegram.error_message(exc)
-                        finish(job, "failed", f"{participant.account.first_name}: {detail}")
-                        break
+                        retry_after = getattr(exc, "retry_after", 0) or (exc.seconds if isinstance(exc, errors.FloodWaitError) else 0)
+                        participant.next_message_at = max(participant.next_message_at, timezone.now() + timedelta(seconds=retry_after))
+                        participant.failures += 1
+                        participant.error = detail[:255]
+                        participant.save(update_fields=["next_message_at", "failures", "error"])
+                        telegram.record(job.owner, "Сообщение не отправлено", f"{participant.account.first_name}: {detail}", "warning")
+                        continue
                     except Exception as exc:
                         logger.error("Warmup send failed (%s)", type(exc).__name__)
-                        finish(job, "failed", f"{participant.account.first_name}: не удалось отправить сообщение. Проверь сессию аккаунта.")
-                        break
+                        participant.failures += 1
+                        participant.error = "Не удалось отправить сообщение. Проверь сессию аккаунта."
+                        participant.save(update_fields=["failures", "error"])
+                        telegram.record(job.owner, "Сообщение не отправлено", f"{participant.account.first_name}: {participant.error}", "warning")
+                        continue
                     if sent:
                         participant.sent += 1
+                        participant.error = ""
                         participant.next_message_at = next_message_time(timezone.now())
-                        participant.save(update_fields=["sent", "next_message_at"])
+                        participant.save(update_fields=["sent", "next_message_at", "error"])
                         telegram.record(job.owner, "Сообщение отправлено", f"{participant.account.first_name} → {recipient.first_name}", "success")
                     break
         except ValidationError:

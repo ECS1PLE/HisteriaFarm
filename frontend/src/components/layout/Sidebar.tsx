@@ -26,6 +26,8 @@ interface Props {
   onSettings: () => void
   onClose: () => void
   mobileOpen: boolean
+  username: string
+  plan: string
 }
 export default function Sidebar({
   page,
@@ -37,6 +39,8 @@ export default function Sidebar({
   onSettings,
   onClose,
   mobileOpen,
+  username,
+  plan,
 }: Props) {
   const navigate = (action: () => void) => {
     action()
@@ -54,6 +58,11 @@ export default function Sidebar({
       label: 'Задачи',
       icon: UnorderedListOutlined,
       count: runningCount || undefined,
+    },
+    {
+      value: 'monitoring' as const,
+      label: 'Отслеживание',
+      icon: CommentOutlined,
     },
     {
       value: 'activity' as const,
@@ -135,9 +144,9 @@ export default function Sidebar({
             onClick={() => navigate(onSettings)}
           />
           <UserProfile
-            name="ECS1PLE"
-            description="Владелец пространства"
-            initial="E"
+            name={username}
+            description={`Тариф ${plan}`}
+            initial={username.slice(0, 1).toUpperCase()}
           />
         </div>
       </aside>

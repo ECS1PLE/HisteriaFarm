@@ -23,9 +23,10 @@ export default function WarmupPanel({ jobs, workerOnline, busy, onStop }: {
           <div key={job.id} className="warmup-row">
             <div>
               <strong>{labels[job.status]} · {job.participants.length} аккаунтов</strong>
-              <p className="muted-text">Отправлено: {job.sent} · с {date(job.startedAt)} до {date(job.endsAt)} · 40–80 минут</p>
+              <p className="muted-text">Отправлено: {job.sent} · ошибок: {job.failures} · с {date(job.startedAt)} до {date(job.endsAt)} · 40–80 минут</p>
               {job.status === 'running' && <p>Прошло {job.progress}% суток. {next ? `Следующая отправка: ${date(next)}` : 'Ожидание завершения суток.'}</p>}
               {job.error && <Notice type="error" title={job.error} />}
+              <div className="warmup-participants">{job.participants.map((participant) => <div key={participant.accountId} className={participant.error ? 'warmup-participant has-error' : 'warmup-participant'}><strong>{participant.name}</strong><span>{participant.sent} отправлено · {participant.failures} ошибок{participant.nextMessageAt ? ` · следующая: ${date(participant.nextMessageAt)}` : ''}</span>{participant.error && <small>{participant.error}</small>}</div>)}</div>
             </div>
             {job.status === 'running' && <Button danger loading={busy} onClick={() => onStop(job.id)}>Остановить прогрев</Button>}
           </div>

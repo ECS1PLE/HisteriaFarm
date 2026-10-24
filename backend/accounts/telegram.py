@@ -12,9 +12,10 @@ from .models import Account, LoginAttempt, TelegramSettings, Activity
 from .security import encrypt, decrypt, session_lock
 
 class TelegramFailure(Exception):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, *, retry_after=0):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 def error_message(exc):
     if isinstance(exc, errors.FloodWaitError):
@@ -44,6 +45,21 @@ def error_message(exc):
         "AuthKeyDuplicatedError": "Telegram отозвал сессию из-за параллельного подключения. Добавь аккаунт заново.",
         "UserDeactivatedBanError": "Аккаунт заблокирован Telegram.",
         "ApiIdInvalidError": "Неверные Telegram API ID или API Hash.",
+        "UserPrivacyRestrictedError": "Настройки приватности получателя запрещают эту отправку.",
+        "UserIsBlockedError": "Telegram не разрешает отправку: пользователь заблокирован.",
+        "YouBlockedUserError": "Этот получатель заблокирован отправителем в Telegram.",
+        "PeerFloodError": "Telegram ограничил отправку сообщений. Проверь спамблок аккаунта.",
+        "ReactionInvalidError": "Эта реакция недоступна в выбранном чате.",
+        "ReactionsTooManyError": "Telegram достиг лимита разных реакций на этом сообщении.",
+        "MessageIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
+        "MsgIdInvalidError": "Сообщение удалено или недоступно аккаунту.",
+        "ChannelPrivateError": "Этот чат недоступен аккаунту. Проверь его участие и права доступа.",
+        "ChannelsTooMuchError": "Аккаунт достиг лимита подписок на каналы и группы.",
+        "UserChannelsTooMuchError": "Аккаунт достиг лимита подписок на каналы и группы.",
+        "InviteHashExpiredError": "Пригласительная ссылка истекла или была отозвана.",
+        "InviteHashInvalidError": "Telegram не принял пригласительную ссылку.",
+        "UserBannedInChannelError": "Аккаунт заблокирован в этом канале.",
+        "StarsPaymentRequiredError": "Для подписки требуется оплата. Платные подписки не поддерживаются.",
     }
     if isinstance(exc, (TimeoutError, OSError)):
         return "Не удалось подключиться к Telegram. Проверь сеть и повтори."
@@ -52,6 +68,8 @@ def error_message(exc):
         return messages[name]
     if isinstance(exc, errors.RPCError):
         code = getattr(exc, "message", "") or ""
+        if code == "STARS_PAYMENT_REQUIRED":
+            return "Для подписки требуется оплата. Платные подписки не поддерживаются."
         diagnostic = code if re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) else name
         return f"Telegram отклонил операцию ({diagnostic})."
     return "Не удалось выполнить операцию Telegram. Повтори позже."
@@ -73,7 +91,7 @@ def run(coro):
     except TelegramFailure:
         raise
     except (errors.RPCError, OSError, TimeoutError) as exc:
-        raise TelegramFailure(error_message(exc)) from None
+        raise TelegramFailure(error_message(exc), retry_after=getattr(exc, "seconds", 0) if isinstance(exc, errors.FloodWaitError) else 0) from None
 
 def client_for(payload, *, request_retries=0):
     c = payload["credentials"]
@@ -154,6 +172,8 @@ def finish_login(owner, attempt_id, code="", password=""):
             raise TelegramFailure("Аккаунт уже подключён к другому пользователю панели.", 409)
         account, _ = Account.objects.update_or_create(telegram_id=profile["telegram_id"], defaults={
             **profile, "owner": owner, "group": payload["group"], "session": encrypt({"credentials": payload["credentials"], "session": payload["session"]}), "status": "ready", "error": "",
+            "session_status": "valid", "session_checked_at": timezone.now(), "session_error": "",
+            "spam_status": "unchecked", "spam_checked_at": None, "spam_detail": "", "check_retry_at": None,
         })
         row.delete()
         record(owner, "Аккаунт подключён", account.first_name, "success")

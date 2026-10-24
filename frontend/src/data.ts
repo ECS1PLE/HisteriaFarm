@@ -13,6 +13,7 @@ export const modeLabels: Record<Mode, string> = {
   scenario: 'Сценарии',
 }
 export const groups = ['Основная', 'Резерв', 'Тестовая']
+export const reactionOptions = ['👍', '👎', '❤️', '🔥', '👏', '🎉', '🤩', '😁', '🤔', '😢', '😱', '💯']
 export const defaultConfig: TaskConfig = {
   mode: 'comments',
   comment: '',

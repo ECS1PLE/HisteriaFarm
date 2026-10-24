@@ -78,7 +78,7 @@ def serialize(draft, payload=None):
         "selectedReasons": payload.get("selectedReasons", []),
         "reason": REASONS[payload["reason"]][0] if payload.get("reason") else "", "expiresAt": draft.expires.isoformat()}
 
-def prepare(account, data):
+def prepare(account, data, owner=None):
     if account.status != "ready":
         raise ValidationError("Для жалобы нужен готовый аккаунт. Сначала проверь его в Telegram.")
     payload = {**target(data), "message": comment(data)}
@@ -89,7 +89,7 @@ def prepare(account, data):
         if reason == "other" and not payload["message"]:
             raise ValidationError("Для причины «Другое» опиши нарушение.")
         payload["reason"] = reason
-    draft = ReportDraft.objects.create(account=account, payload=encrypt(payload), expires=timezone.now() + timedelta(minutes=15))
+    draft = ReportDraft.objects.create(account=account, owner=owner or account.owner, payload=encrypt(payload), expires=timezone.now() + timedelta(minutes=15))
     return serialize(draft, payload)
 
 def advance(draft, data):
@@ -174,5 +174,5 @@ def advance(draft, data):
         draft.payload = encrypt(payload)
         draft.save(update_fields=["state", "payload"])
         if draft.state == "reported":
-            telegram.record(account.owner, "Жалоба принята Telegram", f"{account.first_name} → {payload['target']}", "success")
+            telegram.record(draft.owner or account.owner, "Жалоба принята Telegram", f"{account.first_name} → {payload['target']}", "success")
         return serialize(draft, payload)

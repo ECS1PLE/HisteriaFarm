@@ -61,7 +61,7 @@ export default function WorkspaceDialogs({
         onGroupChange={controller.changeGroup}
         onSaved={controller.refresh}
         onBusy={setProfileBusy}
-        busy={profileBusy}
+        busy={profileBusy || controller.busy}
       />
       <SettingsDrawer
         open={controller.settingsOpen}

@@ -10,7 +10,7 @@ from django.utils import timezone
 from telethon import errors
 
 from . import warmup, telegram
-from .models import Account, WarmupJob
+from .models import Account, WarmupJob, Activity
 from .security import encrypt, session_lock
 from .tests import FakeClient
 
@@ -118,17 +118,32 @@ class WarmupTests(TestCase):
         current.refresh_from_db()
         self.assertEqual(current.status, "completed")
 
-    def test_telegram_failure_stops_without_retries(self):
+    def test_telegram_failure_continues_to_next_account_without_immediate_retry(self):
         self.start()
         job = WarmupJob.objects.get()
         self.due(job)
-        with patch("accounts.warmup.send_message", side_effect=telegram.TelegramFailure("Telegram просит подождать 3600 сек.")) as send:
+        with patch("accounts.warmup.send_message", side_effect=[telegram.TelegramFailure("Telegram просит подождать 7200 сек.", retry_after=7200), True]) as send:
             warmup.tick()
             warmup.tick()
-            self.assertEqual(send.call_count, 1)
+            self.assertEqual(send.call_count, 2)
         job.refresh_from_db()
-        self.assertEqual(job.status, "failed")
-        self.assertIn("3600", job.error)
+        self.assertEqual(job.status, "running")
+        participants = list(job.participants.order_by("id"))
+        self.assertEqual(participants[0].failures, 1)
+        self.assertIn("7200", participants[0].error)
+        self.assertGreaterEqual(participants[0].next_message_at, timezone.now() + timedelta(seconds=7198))
+        self.assertEqual(participants[1].sent, 1)
+        result = warmup.serialize(job)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["failures"], 1)
+        # The later successful interval clears the last error, retaining history.
+        participants[0].next_message_at = timezone.now() - timedelta(seconds=1)
+        participants[0].save()
+        with patch("accounts.warmup.send_message", return_value=True):
+            warmup.tick()
+        participants[0].refresh_from_db()
+        self.assertEqual(participants[0].error, "")
+        self.assertEqual(participants[0].failures, 1)
 
     def test_deleted_account_and_busy_session(self):
         self.start()
@@ -153,15 +168,30 @@ class WarmupTests(TestCase):
             warmup.tick()
             send.assert_not_called()
 
-    def test_unreadable_session_stops_task_without_exposing_internal_error(self):
+    def test_unreadable_session_skips_account_without_exposing_internal_error(self):
         self.start()
         job = WarmupJob.objects.get()
         self.due(job)
-        with patch("accounts.warmup.send_message", side_effect=KeyError("private-session")), self.assertLogs("accounts.warmup", level="ERROR"):
+        with patch("accounts.warmup.send_message", side_effect=[KeyError("private-session"), True]) as send, self.assertLogs("accounts.warmup", level="ERROR"):
             warmup.tick()
+            self.assertEqual(send.call_count, 2)
         job.refresh_from_db()
-        self.assertEqual(job.status, "failed")
-        self.assertNotIn("private-session", job.error)
+        self.assertEqual(job.status, "running")
+        self.assertEqual(sum(p.sent for p in job.participants.all()), 1)
+        self.assertNotIn("private-session", json.dumps(warmup.serialize(job)))
+        self.assertNotIn("private-session", str(list(Activity.objects.values_list("detail", flat=True))))
+
+    def test_every_failed_sender_is_rescheduled_and_job_keeps_running(self):
+        self.start()
+        job = WarmupJob.objects.get()
+        self.due(job)
+        with patch("accounts.warmup.send_message", side_effect=OSError("network")) as send:
+            warmup.tick()
+            warmup.tick()
+            self.assertEqual(send.call_count, 2)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "running")
+        self.assertEqual(sum(p.failures for p in job.participants.all()), 2)
 
     def test_authenticated_csrf_required(self):
         browser = Client(enforce_csrf_checks=True)
