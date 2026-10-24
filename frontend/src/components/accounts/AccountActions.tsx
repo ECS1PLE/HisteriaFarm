@@ -50,7 +50,7 @@ export default function AccountActions({
           label: 'Удалить аккаунт',
           icon: <DeleteOutlined aria-hidden="true" />,
           danger: true,
-          disabled: busy || account.status === 'working',
+          disabled: busy || account.status === 'working' || account.owned === false,
           onClick: () => onDelete(account),
         },
       ]}

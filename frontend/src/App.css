@@ -1828,3 +1828,15 @@
   .account-heading-actions { justify-content: flex-start; gap: 8px; }
   .warmup-panel { padding-inline: 16px; }
 }
+/* Plans and persistent Telegram monitoring */
+.membership-panel { padding: 20px 24px; margin-bottom: 24px; }
+.membership-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.membership-heading h3 { margin: 0; }
+.monitoring-layout { display: grid; grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 24px; margin-bottom: 24px; align-items: start; }
+.monitor-form { padding: 24px; min-width: 0; }
+.monitor-form h2 { margin-top: 0; }
+.monitor-form .ant-select { width: 100%; }
+.monitor-rules { display: grid; gap: 16px; min-width: 0; }
+.monitor-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.monitor-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 1000px) { .monitoring-layout { grid-template-columns: 1fr; } }

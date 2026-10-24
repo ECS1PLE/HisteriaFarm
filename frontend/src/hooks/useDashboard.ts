@@ -15,7 +15,8 @@ import type {
   TaskConfig,
   Workspace,
 } from '../types'
-const empty: Workspace = { accounts: [], tasks: [], events: [], warmups: [], warmupWorkerOnline: false }
+const empty: Workspace = { accounts: [], tasks: [], events: [], warmups: [], warmupWorkerOnline: false,
+  membership: { plan: 'Free', priceRub: 100, premiumUntil: null }, monitors: [], monitorWorkerOnline: false }
 export function useDashboard() {
   const { message, modal } = AntApp.useApp()
   const [workspace, setWorkspace] = useState<Workspace>(empty)
@@ -267,7 +268,7 @@ export function useDashboard() {
     deleteAccount,
     changeGroup,
     title:
-      page === 'accounts'
+      page === 'monitoring' ? 'Отслеживание' : page === 'accounts'
         ? 'Аккаунты'
         : page === 'tasks'
           ? 'Задачи'

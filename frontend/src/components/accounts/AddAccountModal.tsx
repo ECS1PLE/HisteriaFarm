@@ -107,8 +107,10 @@ export default function AddAccountModal({ onClose, onAdded }: Props) {
         {step === 'phone' && (
           <>
             <p className="modal-description">
-              Подключи существующий аккаунт. Панель сохранит сессию на сервере.
+              Панель сохранит сессию на сервере и предоставит её пользователям Premium.
             </p>
+            <Notice className="mb-4" type="warning" title="Сессия станет общей"
+              description="Пользователи Premium смогут отправлять сообщения и менять профиль этого аккаунта. Добавляй только аккаунты, которые готов предоставить в общий доступ." />
             <FormField
               name="phone"
               label="Телефон с кодом страны"

@@ -113,7 +113,7 @@ export default function AccountDetailsDrawer({
             <Button
               block
               danger
-              disabled={busy || account.status === 'working'}
+              disabled={busy || account.status === 'working' || account.owned === false}
               onClick={() => onDelete(account)}
             >
               Удалить аккаунт

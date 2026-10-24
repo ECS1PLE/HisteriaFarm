@@ -1,7 +1,7 @@
 export type AccountStatus =
   'ready' | 'working' | 'waiting' | 'error' | 'offline'
 export type Mode = 'comments' | 'reactions' | 'subscriptions' | 'scenario'
-export type Page = 'accounts' | 'tasks' | 'activity'
+export type Page = 'accounts' | 'tasks' | 'activity' | 'monitoring'
 export type CheckKind = 'session' | 'spam' | 'all'
 export interface CheckProgress {
   done: number
@@ -11,6 +11,7 @@ export interface CheckProgress {
   stopping: boolean
 }
 export interface Account {
+  owned?: boolean
   id: string
   name: string
   firstName?: string
@@ -64,6 +65,9 @@ export interface Activity {
 }
 
 export interface Workspace {
+  membership: Membership
+  monitors: MonitorRule[]
+  monitorWorkerOnline: boolean
   accounts: Account[]
   tasks: Task[]
   events: Activity[]
@@ -112,7 +116,30 @@ export interface ProfileFields {
   bio: string
 }
 export interface SessionStatus {
+  membership: Membership | null
   authenticated: boolean
   username: string | null
   telegramConfigured: boolean
+}
+
+export interface Membership {
+  plan: 'Free' | 'Premium'
+  priceRub: number
+  premiumUntil: string | null
+}
+export interface MonitorRule {
+  id: string
+  accountId: string
+  accountName: string
+  mode: 'channel' | 'chat'
+  target: string
+  title: string
+  keyword: string
+  text: string
+  status: 'running' | 'paused'
+  sent: number
+  error: string
+  uncertain: number
+  failed: number
+  lastMessageId: number
 }

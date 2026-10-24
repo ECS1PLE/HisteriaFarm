@@ -15,10 +15,13 @@ import AccountCheckPanel from '../components/dashboard/AccountCheckPanel'
 import AccountsView from '../components/dashboard/AccountsView'
 import WorkspaceDialogs from '../components/dashboard/WorkspaceDialogs'
 import WarmupPanel from '../components/accounts/WarmupPanel'
+import MembershipPanel from '../components/dashboard/MembershipPanel'
+import MonitoringView from '../components/dashboard/MonitoringView'
 import TasksView from '../components/tasks/TasksView'
 import ActivityView from '../components/activity/ActivityView'
 import { useDashboard } from '../hooks/useDashboard'
 const descriptions = {
+  monitoring: 'Автоматические комментарии и ответы по ключевым словам.',
   accounts: 'Сессии, ограничения и активность — всё в одном пространстве.',
   tasks: 'Все режимы работы и прогресс выполнения в одном месте.',
   activity: 'История действий и изменений в твоём пространстве.',
@@ -53,6 +56,8 @@ export default function DashboardPage() {
     <AppLayout
       sidebar={
         <Sidebar
+          username={dashboard.session.username ?? ''}
+          plan={dashboard.membership.plan}
           page={dashboard.page}
           mode={dashboard.mode}
           accountCount={dashboard.accounts.length}
@@ -112,6 +117,8 @@ export default function DashboardPage() {
           </>
         }
       />
+      <MembershipPanel membership={dashboard.membership} />
+      {dashboard.page === 'monitoring' && <MonitoringView accounts={dashboard.accounts} rules={dashboard.monitors} online={dashboard.monitorWorkerOnline} onChanged={dashboard.refresh} />}
       <WorkspaceStats
         total={dashboard.accounts.length}
         ready={dashboard.ready.length}
